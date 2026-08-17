@@ -1,0 +1,1760 @@
+{
+  "document": {
+    "name": "Especificación para agente de IA - Sistema Administrativo Vector IA",
+    "version": "1.0.0",
+    "language": "es-MX",
+    "created_at": "2026-08-13",
+    "status": "ready_for_build",
+    "purpose": "Dar a un agente de desarrollo instrucciones suficientes para diseñar e implementar el MVP del sistema administrativo interno de una empresa de desarrollo de software apoyada con IA."
+  },
+  "agent_instructions": {
+    "role": "Actúa como arquitecto de software, diseñador UX, desarrollador full-stack y responsable de calidad.",
+    "primary_instruction": "Construye un MVP funcional siguiendo esta especificación. Prioriza un flujo completo de principio a fin sobre muchas pantallas incompletas.",
+    "working_rules": [
+      "Antes de modificar código, inspecciona el repositorio, la estructura, las dependencias y las convenciones existentes.",
+      "Si ya existe una arquitectura o stack funcional, consérvalo y adapta esta especificación sin reescribir trabajo útil.",
+      "Si el repositorio está vacío, crea la aplicación con el stack preferido indicado en este documento.",
+      "Trabaja por entregas pequeñas y verificables.",
+      "No inventes integraciones externas ni credenciales.",
+      "No implementes en el MVP conexión directa con SAT, bancos, WhatsApp, correo o firma electrónica certificada.",
+      "Usa migraciones versionadas, datos semilla y validación tanto en cliente como en servidor.",
+      "Mantén los nombres técnicos y enums en inglés estable; muestra etiquetas y textos de interfaz en español.",
+      "No elimines físicamente registros comerciales, financieros o técnicos con historial; usa cancelación, archivado o eliminación lógica.",
+      "Registra en bitácora las operaciones críticas.",
+      "Al terminar cada etapa, ejecuta pruebas, corrige errores y documenta cómo iniciar el proyecto."
+    ],
+    "first_delivery_goal": "Permitir que un usuario cree un cliente, registre un prospecto, genere y acepte una cotización, cree una orden de servicio, autorice el inicio, genere el proyecto, asigne actividades a un técnico, registre tiempo y evidencias, entregue el proyecto, registre una factura y capture el cobro.",
+    "required_outputs": [
+      "Aplicación web funcional.",
+      "Base de datos y migraciones.",
+      "Autenticación y permisos por rol.",
+      "Datos semilla de demostración.",
+      "Pruebas de reglas críticas y del flujo principal.",
+      "README con instalación, variables de entorno, migraciones, semillas, ejecución y pruebas.",
+      "Listado claro de decisiones técnicas y pendientes."
+    ]
+  },
+  "product": {
+    "name": "Vector IA Administración",
+    "type": "Aplicación web administrativa interna",
+    "business": "Empresa pequeña de desarrollo de software y automatizaciones apoyadas con inteligencia artificial",
+    "primary_goal": "Controlar el proceso comercial, la ejecución técnica de proyectos y el resultado financiero sin la complejidad de un ERP.",
+    "central_rule": "El módulo comercial define qué se vendió; el módulo de proyectos controla cómo se ejecuta; el módulo financiero determina cuánto se facturó, cobró, costó y ganó.",
+    "initial_scope": "Una organización, una moneda principal, varios usuarios y roles.",
+    "future_ready_decisions": [
+      "Todas las entidades de negocio deben incluir organization_id, aunque inicialmente exista una sola organización.",
+      "Usar UUID como identificador interno y folios legibles para usuarios.",
+      "Separar importe vendido, facturado y cobrado.",
+      "Separar estado administrativo de la orden y estado técnico del proyecto.",
+      "Guardar una copia inmutable del alcance aceptado al convertir la cotización en orden y proyecto."
+    ],
+    "currency": "MXN",
+    "timezone": "America/Mexico_City",
+    "date_format": "DD/MM/YYYY",
+    "money_rules": {
+      "storage": "decimal(14,2)",
+      "default_tax_rate": 16,
+      "tax_rate_is_configurable": true,
+      "rounding": "half_up_to_2_decimals"
+    }
+  },
+  "scope": {
+    "mvp_modules": [
+      "dashboard",
+      "clients",
+      "commercial",
+      "projects",
+      "finance",
+      "administration"
+    ],
+    "out_of_scope_mvp": [
+      "Contabilidad formal y pólizas contables",
+      "Timbrado directo ante SAT",
+      "Conciliación bancaria automática",
+      "Inventarios",
+      "Nómina",
+      "Aplicación móvil nativa",
+      "Portal para clientes",
+      "Integración con correo o WhatsApp",
+      "Firma electrónica certificada",
+      "Multi-moneda",
+      "Automatizaciones predictivas con IA",
+      "Gestión de repositorios de código y despliegues",
+      "Soporte tipo mesa de ayuda"
+    ]
+  },
+  "architecture": {
+    "preferred_stack_if_repo_is_empty": {
+      "frontend": "Next.js con TypeScript",
+      "ui": "Tailwind CSS y una biblioteca accesible de componentes",
+      "backend": "Rutas o acciones de servidor del framework",
+      "database": "PostgreSQL",
+      "auth_and_storage": "Supabase o equivalente",
+      "orm_or_query_layer": "Prisma, Drizzle o cliente PostgreSQL tipado",
+      "validation": "Zod o equivalente",
+      "testing": "Pruebas unitarias, integración y al menos un flujo end-to-end",
+      "deployment": "Configuración compatible con un proveedor de hosting web y PostgreSQL administrado"
+    },
+    "principles": [
+      "Arquitectura modular dentro de una sola aplicación.",
+      "No usar microservicios en el MVP.",
+      "Separar lógica de negocio, acceso a datos y componentes de interfaz.",
+      "Diseñar servicios idempotentes para conversiones y acciones críticas.",
+      "Implementar autorización del lado del servidor; ocultar botones no sustituye permisos.",
+      "Usar almacenamiento de objetos para archivos y guardar en base de datos solo sus metadatos.",
+      "Agregar índices en organization_id, folios, estados, fechas, responsables y llaves foráneas."
+    ],
+    "technical_conventions": {
+      "ids": "uuid",
+      "timestamps": "ISO 8601 en UTC; convertir a la zona de la organización en interfaz",
+      "required_audit_fields": [
+        "id",
+        "organization_id",
+        "created_at",
+        "created_by",
+        "updated_at",
+        "updated_by"
+      ],
+      "soft_delete_fields": [
+        "archived_at",
+        "archived_by"
+      ],
+      "folio_examples": {
+        "lead": "OP-000001",
+        "quote": "COT-000001-V1",
+        "work_order": "OS-000001",
+        "project": "PRY-000001",
+        "invoice": "FAC-000001",
+        "requirement": "REQ-0001",
+        "change_request": "CAM-0001"
+      }
+    }
+  },
+  "ux": {
+    "style": "Profesional, limpio, sobrio y rápido de operar.",
+    "language": "Español de México",
+    "layout": "Escritorio primero, responsive para tablet y móvil.",
+    "navigation": [
+      "Inicio",
+      "Clientes",
+      "Comercial",
+      "Proyectos",
+      "Finanzas",
+      "Administración"
+    ],
+    "global_patterns": [
+      "Listados con búsqueda, filtros, ordenamiento y paginación.",
+      "Chips de color para estatus, sin depender únicamente del color.",
+      "Formularios divididos en secciones cortas.",
+      "Confirmación para cancelar, archivar, cerrar o revertir.",
+      "Mensajes claros de validación y errores.",
+      "Fechas límite visibles y alertas de atraso.",
+      "Enlaces directos entre cliente, cotización, orden, proyecto, factura y cobro.",
+      "Archivos con nombre, tipo, tamaño, fecha, autor y categoría.",
+      "Historial de cambios críticos visible para dirección y administración."
+    ],
+    "project_detail_tabs": [
+      "Resumen",
+      "Alcance",
+      "Requerimientos",
+      "Actividades",
+      "Tiempos",
+      "Evidencias",
+      "Pruebas",
+      "Entregables",
+      "Cambios de alcance",
+      "Bitácora"
+    ]
+  },
+  "roles": [
+    {
+      "code": "director",
+      "label": "Dirección",
+      "permissions": [
+        "full_access",
+        "view_costs",
+        "view_margins",
+        "approve_scope_changes",
+        "close_periods",
+        "manage_users"
+      ]
+    },
+    {
+      "code": "sales",
+      "label": "Vendedor",
+      "permissions": [
+        "manage_assigned_leads",
+        "manage_quotes",
+        "view_clients",
+        "view_work_orders",
+        "view_project_summary",
+        "review_scope_changes",
+        "view_own_commissions"
+      ],
+      "restrictions": [
+        "No puede ver costos internos ni márgenes.",
+        "No puede modificar actividades técnicas."
+      ]
+    },
+    {
+      "code": "administration",
+      "label": "Administración",
+      "permissions": [
+        "manage_clients",
+        "manage_work_orders",
+        "manage_invoices",
+        "manage_payments",
+        "manage_expenses",
+        "view_finance",
+        "view_projects",
+        "manage_documents"
+      ]
+    },
+    {
+      "code": "project_lead",
+      "label": "Líder técnico",
+      "permissions": [
+        "manage_projects",
+        "assign_project_members",
+        "manage_requirements",
+        "manage_tasks",
+        "manage_tests",
+        "manage_deliverables",
+        "submit_scope_changes",
+        "close_technical_project"
+      ],
+      "restrictions": [
+        "No puede modificar precios, facturas, cobros ni comisiones salvo que además tenga otro rol."
+      ]
+    },
+    {
+      "code": "technician",
+      "label": "Técnico",
+      "permissions": [
+        "view_assigned_projects",
+        "update_assigned_tasks",
+        "register_time",
+        "upload_evidence",
+        "execute_tests",
+        "report_blockers",
+        "submit_scope_changes"
+      ],
+      "restrictions": [
+        "No puede modificar el alcance aceptado.",
+        "No puede ver precios, márgenes, cuentas bancarias ni comisiones.",
+        "No puede cerrar administrativamente una orden."
+      ]
+    }
+  ],
+  "modules": {
+    "dashboard": {
+      "goal": "Mostrar a cada rol sus pendientes, riesgos e indicadores clave.",
+      "widgets": [
+        "Prospectos sin próxima actividad",
+        "Cotizaciones por vencer",
+        "Órdenes pendientes de anticipo o información",
+        "Proyectos activos",
+        "Proyectos en riesgo o retrasados",
+        "Actividades vencidas y próximas",
+        "Entregables próximos",
+        "Facturas vencidas",
+        "Cobranza pendiente",
+        "Ingresos y egresos del mes",
+        "Rentabilidad por proyecto",
+        "Carga de trabajo por técnico"
+      ]
+    },
+    "clients": {
+      "goal": "Conservar un expediente único por cliente y sus contactos.",
+      "features": [
+        "Alta y edición de clientes.",
+        "Contactos múltiples.",
+        "Datos fiscales opcionales.",
+        "Historial relacionado de oportunidades, cotizaciones, órdenes, proyectos, facturas, cobros y documentos.",
+        "Notas internas.",
+        "Archivado sin eliminación física."
+      ]
+    },
+    "commercial": {
+      "goal": "Controlar el proceso desde prospecto hasta orden y facturación.",
+      "sections": {
+        "leads": {
+          "label": "Prospectos y oportunidades",
+          "statuses": [
+            "new",
+            "contacted",
+            "qualified",
+            "requirements_discovery",
+            "quote_sent",
+            "negotiation",
+            "won",
+            "lost",
+            "suspended"
+          ]
+        },
+        "quotes": {
+          "label": "Cotizaciones",
+          "statuses": [
+            "draft",
+            "internal_review",
+            "sent",
+            "negotiation",
+            "accepted",
+            "rejected",
+            "expired",
+            "cancelled"
+          ],
+          "rules": [
+            "Una cotización puede tener versiones.",
+            "Solo una versión puede marcarse como aceptada.",
+            "La versión aceptada se bloquea y no puede editarse.",
+            "Cualquier modificación posterior crea una nueva versión.",
+            "Aceptar una cotización puede generar una orden de servicio una sola vez."
+          ]
+        },
+        "work_orders": {
+          "label": "Órdenes de servicio",
+          "purpose": "Expediente administrativo de lo vendido y enlace entre el área comercial, el proyecto, la facturación y la cobranza.",
+          "statuses": [
+            "pending_deposit",
+            "pending_information",
+            "authorized_to_start",
+            "in_execution",
+            "delivered",
+            "closed",
+            "paused",
+            "cancelled"
+          ],
+          "rules": [
+            "En el MVP una orden genera como máximo un proyecto principal.",
+            "La orden muestra el resumen técnico, pero no duplica actividades, requerimientos o evidencias del proyecto.",
+            "Autorizar el inicio genera el proyecto si todavía no existe.",
+            "La orden puede facturarse en anticipo, avances o cierre.",
+            "Cerrar administrativamente requiere proyecto terminado o cancelado y no tener saldo vencido, salvo autorización de dirección."
+          ]
+        },
+        "invoices": {
+          "label": "Facturas",
+          "statuses": [
+            "draft",
+            "issued",
+            "partially_paid",
+            "paid",
+            "overdue",
+            "cancelled"
+          ],
+          "rules": [
+            "En el MVP la factura se emite fuera del sistema y aquí se registran sus datos, PDF y XML.",
+            "Una orden puede tener varias facturas.",
+            "Una factura puede recibir varios cobros.",
+            "Cancelar una factura no elimina cobros; exige reversar o reasignar sus aplicaciones."
+          ]
+        },
+        "commissions": {
+          "label": "Comisiones",
+          "states": [
+            "estimated",
+            "earned",
+            "released",
+            "paid",
+            "cancelled"
+          ],
+          "rules": [
+            "La comisión estimada nace de la cotización aceptada.",
+            "La comisión se libera proporcionalmente al dinero cobrado, salvo configuración distinta autorizada por dirección.",
+            "Registrar por separado comisión estimada, generada, liberada y pagada."
+          ]
+        }
+      }
+    },
+    "projects": {
+      "goal": "Planear, ejecutar, comprobar y cerrar el trabajo técnico.",
+      "importance": "Este es el módulo operativo principal y debe recibir mayor profundidad funcional que los demás módulos.",
+      "summary_indicators": {
+        "stage": [
+          "planning",
+          "development",
+          "testing",
+          "client_validation",
+          "delivery"
+        ],
+        "situation": [
+          "pending",
+          "active",
+          "paused",
+          "completed",
+          "cancelled"
+        ],
+        "health": [
+          "on_track",
+          "at_risk",
+          "delayed"
+        ]
+      },
+      "sections": {
+        "scope": [
+          "Objetivo del proyecto.",
+          "Problema que se resuelve.",
+          "Funciones incluidas.",
+          "Exclusiones.",
+          "Entregables.",
+          "Restricciones.",
+          "Supuestos.",
+          "Dependencias del cliente.",
+          "Criterios generales de aceptación.",
+          "Versión aprobada."
+        ],
+        "requirements": [
+          "Folio.",
+          "Módulo o función.",
+          "Descripción.",
+          "Prioridad.",
+          "Solicitante.",
+          "Responsable.",
+          "Criterio de aceptación.",
+          "Fecha objetivo.",
+          "Estatus.",
+          "Evidencias y comentarios."
+        ],
+        "tasks": {
+          "board_columns": [
+            "backlog",
+            "ready",
+            "in_progress",
+            "blocked",
+            "in_review",
+            "done"
+          ],
+          "features": [
+            "Vista tablero y lista.",
+            "Responsable y participantes.",
+            "Prioridad.",
+            "Fechas.",
+            "Tiempo estimado y real.",
+            "Checklist.",
+            "Dependencias simples.",
+            "Bloqueo y motivo.",
+            "Requerimiento relacionado.",
+            "Evidencias y comentarios."
+          ]
+        },
+        "time_tracking": [
+          "Registro manual por técnico, fecha y actividad.",
+          "Horas facturables o internas.",
+          "Costo interno por hora tomado del perfil del usuario al momento del registro.",
+          "Comparación de horas estimadas contra reales."
+        ],
+        "evidence": [
+          "Capturas.",
+          "Videos.",
+          "Documentos.",
+          "Archivos.",
+          "Ligas.",
+          "Versiones.",
+          "Categoría y relación con actividad, requerimiento, prueba o entregable."
+        ],
+        "tests": [
+          "Requerimiento relacionado.",
+          "Escenario.",
+          "Resultado esperado.",
+          "Resultado obtenido.",
+          "Responsable.",
+          "Evidencia.",
+          "Incidencia detectada.",
+          "Estatus."
+        ],
+        "deliverables": [
+          "Nombre.",
+          "Descripción.",
+          "Responsable.",
+          "Fecha comprometida.",
+          "Fecha real.",
+          "Versión.",
+          "Evidencia.",
+          "Comentarios del cliente.",
+          "Estatus de aceptación.",
+          "Aceptado por y fecha de aceptación."
+        ],
+        "scope_changes": [
+          "Descripción de la solicitud.",
+          "Solicitante.",
+          "Motivo.",
+          "Impacto técnico.",
+          "Horas adicionales.",
+          "Costo adicional sugerido.",
+          "Cambio de fecha.",
+          "Evidencia.",
+          "Evaluación comercial.",
+          "Autorización.",
+          "Estatus."
+        ],
+        "log": [
+          "Reuniones.",
+          "Decisiones.",
+          "Bloqueos.",
+          "Solicitudes.",
+          "Cambios.",
+          "Entregas.",
+          "Aprobaciones.",
+          "Reprogramaciones.",
+          "Comentarios relevantes."
+        ]
+      },
+      "templates": {
+        "mvp": true,
+        "types": [
+          "Desarrollo de sistema nuevo",
+          "Modificación de sistema",
+          "Automatización con IA",
+          "Integración",
+          "Implementación",
+          "Mantenimiento o soporte"
+        ],
+        "can_preload": [
+          "Etapas",
+          "Requerimientos base",
+          "Actividades",
+          "Checklist",
+          "Pruebas",
+          "Entregables"
+        ]
+      }
+    },
+    "finance": {
+      "goal": "Control gerencial de flujo, cobranza, gastos, costos y rentabilidad; no sustituye la contabilidad formal.",
+      "features": [
+        "Cuentas bancarias y cajas.",
+        "Ingresos.",
+        "Egresos.",
+        "Cuentas por cobrar a partir de facturas.",
+        "Cuentas por pagar básicas.",
+        "Anticipos y abonos.",
+        "Transferencias entre cuentas propias.",
+        "Categorías financieras.",
+        "Costos directos por proyecto.",
+        "Costo de horas por proyecto.",
+        "Flujo mensual.",
+        "Rentabilidad por proyecto.",
+        "Comisiones."
+      ],
+      "rules": [
+        "Una transferencia interna genera salida y entrada vinculadas y no cuenta como ingreso o gasto operativo.",
+        "Un préstamo o aportación no cuenta como venta.",
+        "Un retiro de socio no cuenta como gasto operativo.",
+        "Un movimiento conciliado no puede eliminarse.",
+        "Las correcciones financieras se realizan mediante cancelación o reverso con motivo y autorización.",
+        "Distinguir fecha de operación, fecha de vencimiento y fecha real de pago."
+      ]
+    },
+    "administration": {
+      "goal": "Configurar usuarios, roles, catálogos, folios y datos generales.",
+      "features": [
+        "Usuarios activos e inactivos.",
+        "Roles acumulables.",
+        "Costo interno por hora de usuario.",
+        "Catálogos de servicios, tipos de proyecto, prioridades y categorías financieras.",
+        "Configuración de folios.",
+        "Datos y logotipo de la organización.",
+        "Porcentaje de impuesto predeterminado.",
+        "Bitácora de auditoría."
+      ]
+    }
+  },
+  "data_model": {
+    "common_field_types": {
+      "uuid": "Identificador UUID.",
+      "money": "decimal(14,2).",
+      "percentage": "decimal(5,2).",
+      "date": "Fecha sin hora.",
+      "datetime": "Timestamp UTC.",
+      "text_array": "JSONB array de textos cuando no requiere consulta relacional.",
+      "metadata": "JSONB para datos auxiliares no críticos."
+    },
+    "entities": {
+      "organizations": {
+        "fields": {
+          "id": "uuid required",
+          "name": "string required",
+          "legal_name": "string optional",
+          "tax_id": "string optional",
+          "currency": "string default MXN",
+          "timezone": "string default America/Mexico_City",
+          "default_tax_rate": "percentage default 16",
+          "settings": "json optional"
+        }
+      },
+      "user_profiles": {
+        "fields": {
+          "id": "uuid required; equals auth user id",
+          "organization_id": "uuid required",
+          "full_name": "string required",
+          "email": "string required unique within organization",
+          "active": "boolean default true",
+          "hourly_cost": "money default 0",
+          "roles": "string array required",
+          "avatar_url": "string optional"
+        }
+      },
+      "clients": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "client_number": "string generated unique within organization",
+          "type": "enum person|company",
+          "display_name": "string required",
+          "legal_name": "string optional",
+          "tax_id": "string optional",
+          "tax_regime": "string optional",
+          "billing_email": "string optional",
+          "phone": "string optional",
+          "website": "string optional",
+          "address": "json optional",
+          "assigned_sales_user_id": "uuid optional",
+          "notes": "text optional",
+          "status": "enum active|inactive|archived"
+        }
+      },
+      "client_contacts": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "client_id": "uuid required",
+          "name": "string required",
+          "position": "string optional",
+          "email": "string optional",
+          "phone": "string optional",
+          "is_primary": "boolean default false",
+          "notes": "text optional"
+        }
+      },
+      "leads": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "folio": "string generated unique",
+          "client_id": "uuid optional until qualified",
+          "contact_id": "uuid optional",
+          "prospect_name": "string required",
+          "contact_name": "string optional",
+          "contact_email": "string optional",
+          "contact_phone": "string optional",
+          "service_interest": "string required",
+          "need_summary": "text optional",
+          "source": "string optional",
+          "assigned_sales_user_id": "uuid required",
+          "estimated_value": "money default 0",
+          "probability_percent": "percentage default 0",
+          "expected_close_date": "date optional",
+          "next_action": "string optional",
+          "next_action_at": "datetime optional",
+          "status": "lead status required",
+          "lost_reason": "string optional",
+          "notes": "text optional"
+        }
+      },
+      "sales_activities": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "lead_id": "uuid required",
+          "type": "enum call|meeting|email|message|note|task",
+          "subject": "string required",
+          "description": "text optional",
+          "scheduled_at": "datetime optional",
+          "completed_at": "datetime optional",
+          "assigned_user_id": "uuid required",
+          "outcome": "text optional",
+          "status": "enum pending|completed|cancelled"
+        }
+      },
+      "quotes": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "quote_number": "string generated",
+          "version": "integer default 1",
+          "parent_quote_id": "uuid optional",
+          "lead_id": "uuid optional",
+          "client_id": "uuid required",
+          "contact_id": "uuid optional",
+          "sales_user_id": "uuid required",
+          "title": "string required",
+          "summary": "text optional",
+          "scope_included": "text array required",
+          "scope_excluded": "text array optional",
+          "deliverables": "text array required",
+          "assumptions": "text array optional",
+          "client_dependencies": "text array optional",
+          "acceptance_criteria": "text array optional",
+          "estimated_duration_days": "integer optional",
+          "valid_until": "date required",
+          "payment_terms": "text required",
+          "warranty_terms": "text optional",
+          "subtotal": "money calculated",
+          "discount": "money default 0",
+          "tax_rate": "percentage required",
+          "tax": "money calculated",
+          "total": "money calculated",
+          "required_deposit": "money default 0",
+          "commission_rate": "percentage default 0",
+          "status": "quote status required",
+          "accepted_at": "datetime optional",
+          "accepted_by_name": "string optional",
+          "acceptance_evidence_file_id": "uuid optional",
+          "locked_at": "datetime optional"
+        }
+      },
+      "quote_items": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "quote_id": "uuid required",
+          "position": "integer required",
+          "type": "enum service|license|expense|discount",
+          "description": "string required",
+          "quantity": "decimal(12,2) default 1",
+          "unit_price": "money required",
+          "line_total": "money calculated"
+        }
+      },
+      "work_orders": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "folio": "string generated unique",
+          "client_id": "uuid required",
+          "accepted_quote_id": "uuid required unique",
+          "sales_user_id": "uuid required",
+          "technical_owner_id": "uuid optional",
+          "title": "string required",
+          "service_description": "text required",
+          "sold_subtotal": "money immutable snapshot",
+          "sold_tax": "money immutable snapshot",
+          "sold_total": "money immutable snapshot",
+          "required_deposit": "money immutable snapshot",
+          "payment_terms_snapshot": "text required",
+          "scope_snapshot": "json required immutable",
+          "promised_date": "date optional",
+          "authorized_at": "datetime optional",
+          "delivered_at": "datetime optional",
+          "closed_at": "datetime optional",
+          "status": "work order status required",
+          "pause_reason": "text optional",
+          "cancellation_reason": "text optional"
+        }
+      },
+      "invoices": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "folio": "string generated",
+          "work_order_id": "uuid required",
+          "client_id": "uuid required",
+          "external_invoice_number": "string optional",
+          "uuid_fiscal": "string optional",
+          "invoice_type": "enum deposit|progress|final|other",
+          "issued_date": "date required",
+          "due_date": "date required",
+          "subtotal": "money required",
+          "tax": "money required",
+          "total": "money required",
+          "paid_amount": "money calculated default 0",
+          "balance": "money calculated",
+          "status": "invoice status required",
+          "pdf_file_id": "uuid optional",
+          "xml_file_id": "uuid optional",
+          "notes": "text optional",
+          "cancelled_at": "datetime optional",
+          "cancellation_reason": "text optional"
+        }
+      },
+      "payments": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "folio": "string generated",
+          "client_id": "uuid required",
+          "payment_date": "date required",
+          "amount": "money required positive",
+          "financial_account_id": "uuid required",
+          "method": "enum cash|transfer|card|check|other",
+          "reference": "string optional",
+          "proof_file_id": "uuid optional",
+          "notes": "text optional",
+          "status": "enum registered|confirmed|reversed",
+          "reversed_payment_id": "uuid optional"
+        }
+      },
+      "payment_allocations": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "payment_id": "uuid required",
+          "invoice_id": "uuid required",
+          "amount": "money required positive"
+        },
+        "rules": [
+          "La suma de aplicaciones no puede superar el importe del cobro.",
+          "La aplicación no puede superar el saldo de la factura.",
+          "Un cobro puede aplicarse a varias facturas."
+        ]
+      },
+      "commissions": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "sales_user_id": "uuid required",
+          "quote_id": "uuid required",
+          "work_order_id": "uuid required",
+          "base_amount": "money required",
+          "rate": "percentage required",
+          "estimated_amount": "money calculated",
+          "earned_amount": "money calculated",
+          "released_amount": "money calculated",
+          "paid_amount": "money calculated",
+          "status": "commission status required"
+        }
+      },
+      "projects": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "folio": "string generated unique",
+          "work_order_id": "uuid required unique in MVP",
+          "client_id": "uuid required",
+          "name": "string required",
+          "project_type": "string required",
+          "leader_user_id": "uuid required",
+          "priority": "enum low|medium|high|urgent",
+          "start_date": "date optional",
+          "promised_date": "date optional",
+          "replanned_date": "date optional",
+          "completed_at": "datetime optional",
+          "progress_percent": "percentage calculated",
+          "stage": "project stage required",
+          "situation": "project situation required",
+          "health": "project health required",
+          "health_override_reason": "text optional",
+          "estimated_hours": "decimal(10,2) default 0",
+          "actual_hours": "decimal(10,2) calculated",
+          "objective": "text required",
+          "problem_statement": "text optional",
+          "included_scope": "text array required immutable baseline",
+          "excluded_scope": "text array optional immutable baseline",
+          "deliverables_baseline": "text array required",
+          "assumptions": "text array optional",
+          "client_dependencies": "text array optional",
+          "constraints": "text array optional",
+          "general_acceptance_criteria": "text array optional",
+          "scope_version": "integer default 1",
+          "pause_reason": "text optional"
+        }
+      },
+      "project_members": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "project_id": "uuid required",
+          "user_id": "uuid required",
+          "project_role": "enum leader|developer|qa|observer",
+          "allocation_percent": "percentage optional",
+          "active": "boolean default true"
+        }
+      },
+      "requirements": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "project_id": "uuid required",
+          "folio": "string generated within project",
+          "module_name": "string optional",
+          "title": "string required",
+          "description": "text required",
+          "business_value": "text optional",
+          "priority": "enum low|medium|high|critical",
+          "requester_name": "string optional",
+          "owner_user_id": "uuid optional",
+          "acceptance_criteria": "text required",
+          "target_date": "date optional",
+          "status": "enum proposed|analysis|approved|development|testing|validated|rejected|out_of_scope",
+          "version": "integer default 1"
+        }
+      },
+      "tasks": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "project_id": "uuid required",
+          "requirement_id": "uuid optional",
+          "parent_task_id": "uuid optional",
+          "title": "string required",
+          "description": "text optional",
+          "assignee_user_id": "uuid optional",
+          "priority": "enum low|medium|high|urgent",
+          "status": "task board status required",
+          "start_date": "date optional",
+          "due_date": "date optional",
+          "estimated_hours": "decimal(10,2) default 0",
+          "actual_hours": "decimal(10,2) calculated",
+          "weight": "decimal(8,2) default 1",
+          "blocked_reason": "text optional",
+          "completed_at": "datetime optional",
+          "position": "integer required"
+        }
+      },
+      "task_checklist_items": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "task_id": "uuid required",
+          "label": "string required",
+          "position": "integer required",
+          "completed": "boolean default false",
+          "completed_at": "datetime optional",
+          "completed_by": "uuid optional"
+        }
+      },
+      "time_entries": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "project_id": "uuid required",
+          "task_id": "uuid optional",
+          "user_id": "uuid required",
+          "work_date": "date required",
+          "hours": "decimal(6,2) required positive max 24",
+          "type": "enum billable|internal|rework|support",
+          "description": "text required",
+          "hourly_cost_snapshot": "money required",
+          "total_cost": "money calculated",
+          "approved_by": "uuid optional",
+          "approved_at": "datetime optional"
+        }
+      },
+      "files": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "storage_key": "string required unique",
+          "original_name": "string required",
+          "mime_type": "string required",
+          "size_bytes": "integer required",
+          "category": "enum document|image|video|evidence|invoice_pdf|invoice_xml|acceptance|other",
+          "description": "text optional",
+          "uploaded_by": "uuid required",
+          "uploaded_at": "datetime required"
+        }
+      },
+      "file_links": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "file_id": "uuid required",
+          "entity_type": "enum client|lead|quote|work_order|invoice|project|requirement|task|test|deliverable|change_request|log_entry",
+          "entity_id": "uuid required"
+        }
+      },
+      "test_cases": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "project_id": "uuid required",
+          "requirement_id": "uuid optional",
+          "title": "string required",
+          "scenario": "text required",
+          "expected_result": "text required",
+          "actual_result": "text optional",
+          "executor_user_id": "uuid optional",
+          "executed_at": "datetime optional",
+          "status": "enum pending|passed|failed|blocked|not_applicable",
+          "issue_summary": "text optional"
+        }
+      },
+      "deliverables": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "project_id": "uuid required",
+          "name": "string required",
+          "description": "text optional",
+          "owner_user_id": "uuid required",
+          "promised_date": "date required",
+          "delivered_at": "datetime optional",
+          "version": "string optional",
+          "status": "enum pending|preparing|delivered|observed|corrected|accepted|rejected",
+          "client_comments": "text optional",
+          "accepted_by_name": "string optional",
+          "accepted_at": "datetime optional"
+        }
+      },
+      "change_requests": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "project_id": "uuid required",
+          "folio": "string generated within project",
+          "title": "string required",
+          "description": "text required",
+          "requester_name": "string required",
+          "reason": "text optional",
+          "technical_impact": "text optional",
+          "affected_requirement_ids": "uuid array optional",
+          "additional_hours": "decimal(10,2) default 0",
+          "suggested_additional_cost": "money default 0",
+          "new_proposed_date": "date optional",
+          "commercial_decision": "enum pending|include_no_charge|additional_quote|reject|future_phase",
+          "status": "enum requested|analysis|quoted|authorized|rejected|implemented|cancelled",
+          "approved_by": "uuid optional",
+          "approved_at": "datetime optional",
+          "client_authorization_reference": "string optional"
+        }
+      },
+      "project_log_entries": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "project_id": "uuid required",
+          "type": "enum meeting|decision|blocker|request|change|delivery|approval|reschedule|note|system",
+          "title": "string required",
+          "description": "text required",
+          "occurred_at": "datetime required",
+          "responsible_user_id": "uuid optional",
+          "visible_to_technicians": "boolean default true"
+        }
+      },
+      "project_templates": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "name": "string required",
+          "project_type": "string required",
+          "description": "text optional",
+          "template_data": "json required",
+          "active": "boolean default true"
+        }
+      },
+      "financial_accounts": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "name": "string required",
+          "type": "enum bank|cash|card_clearing",
+          "bank_name": "string optional",
+          "last_four": "string optional",
+          "opening_balance": "money default 0",
+          "active": "boolean default true"
+        }
+      },
+      "financial_categories": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "name": "string required",
+          "type": "enum income|expense|transfer|contribution|loan|partner_withdrawal",
+          "parent_id": "uuid optional",
+          "active": "boolean default true"
+        }
+      },
+      "financial_transactions": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "folio": "string generated",
+          "type": "enum income|expense|transfer_out|transfer_in|contribution|loan|partner_withdrawal|reversal",
+          "operation_date": "date required",
+          "amount": "money required positive",
+          "financial_account_id": "uuid required",
+          "category_id": "uuid required",
+          "client_id": "uuid optional",
+          "vendor_name": "string optional",
+          "work_order_id": "uuid optional",
+          "project_id": "uuid optional",
+          "payment_id": "uuid optional",
+          "related_transaction_id": "uuid optional",
+          "description": "text required",
+          "reference": "string optional",
+          "status": "enum draft|confirmed|reconciled|cancelled|reversed",
+          "reconciled_at": "datetime optional",
+          "cancellation_reason": "text optional"
+        }
+      },
+      "payables": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "vendor_name": "string required",
+          "description": "text required",
+          "project_id": "uuid optional",
+          "issue_date": "date required",
+          "due_date": "date required",
+          "total": "money required",
+          "paid_amount": "money calculated default 0",
+          "balance": "money calculated",
+          "status": "enum pending|partially_paid|paid|overdue|cancelled",
+          "document_file_id": "uuid optional"
+        }
+      },
+      "audit_logs": {
+        "fields": {
+          "id": "uuid required",
+          "organization_id": "uuid required",
+          "actor_user_id": "uuid required",
+          "action": "string required",
+          "entity_type": "string required",
+          "entity_id": "uuid required",
+          "before_data": "json optional",
+          "after_data": "json optional",
+          "reason": "text optional",
+          "created_at": "datetime required"
+        }
+      }
+    },
+    "relationships": [
+      "organization 1:N users, clients and every business entity",
+      "client 1:N contacts, leads, quotes, work_orders, invoices, payments and projects",
+      "lead 1:N sales_activities and quotes",
+      "quote 1:N quote_items",
+      "accepted quote 1:0..1 work_order",
+      "work_order 1:0..1 project in MVP",
+      "work_order 1:N invoices",
+      "payment N:M invoices through payment_allocations",
+      "project N:M users through project_members",
+      "project 1:N requirements, tasks, time_entries, tests, deliverables, change_requests and log_entries",
+      "requirement 1:N tasks and tests",
+      "task 1:N checklist_items and time_entries",
+      "file N:M supported entities through file_links"
+    ]
+  },
+  "workflows": {
+    "main_business_flow": [
+      {
+        "step": 1,
+        "action": "Registrar prospecto",
+        "owner": "sales",
+        "result": "Oportunidad con responsable, necesidad y próxima acción."
+      },
+      {
+        "step": 2,
+        "action": "Calificar y dar seguimiento",
+        "owner": "sales",
+        "result": "Cliente creado o vinculado y requerimiento comercial básico."
+      },
+      {
+        "step": 3,
+        "action": "Crear y enviar cotización",
+        "owner": "sales",
+        "result": "Versión con alcance, exclusiones, entregables, precio, tiempo y forma de pago."
+      },
+      {
+        "step": 4,
+        "action": "Aceptar cotización",
+        "owner": "sales",
+        "result": "Versión bloqueada, oportunidad ganada y orden de servicio generada."
+      },
+      {
+        "step": 5,
+        "action": "Validar anticipo e información",
+        "owner": "administration",
+        "result": "Orden autorizada para comenzar."
+      },
+      {
+        "step": 6,
+        "action": "Generar proyecto desde la orden",
+        "owner": "system",
+        "result": "Proyecto con copia del alcance vendido, líder, fechas y plantilla opcional."
+      },
+      {
+        "step": 7,
+        "action": "Planear y ejecutar",
+        "owner": "project_lead_and_technician",
+        "result": "Requerimientos, actividades, checklist, tiempos, evidencias y avances."
+      },
+      {
+        "step": 8,
+        "action": "Controlar cambios",
+        "owner": "project_lead_and_sales",
+        "result": "Solicitudes evaluadas y autorizadas, rechazadas o enviadas a cotización adicional."
+      },
+      {
+        "step": 9,
+        "action": "Probar y entregar",
+        "owner": "project_lead",
+        "result": "Pruebas, entregables y aceptación documentada."
+      },
+      {
+        "step": 10,
+        "action": "Facturar y cobrar",
+        "owner": "administration",
+        "result": "Facturas registradas, cobros aplicados y comisiones actualizadas."
+      },
+      {
+        "step": 11,
+        "action": "Cerrar",
+        "owner": "project_lead_and_administration",
+        "result": "Proyecto cerrado técnicamente y orden cerrada administrativamente."
+      }
+    ],
+    "quote_acceptance": {
+      "trigger": "quote.status changes to accepted",
+      "preconditions": [
+        "La cotización tiene cliente, vigencia, alcance, entregables, precio y forma de pago.",
+        "Existe evidencia o referencia de aceptación.",
+        "No existe otra versión aceptada del mismo grupo."
+      ],
+      "atomic_actions": [
+        "Bloquear la cotización.",
+        "Cambiar el lead a won.",
+        "Crear work_order con importes y alcance como snapshot.",
+        "Crear commission estimada si la tasa es mayor que cero.",
+        "Registrar evento en audit_log."
+      ]
+    },
+    "project_creation": {
+      "trigger": "work_order.status changes to authorized_to_start",
+      "preconditions": [
+        "Existe cotización aceptada.",
+        "Se cumplió el anticipo requerido o dirección autorizó excepción.",
+        "Existe líder técnico.",
+        "No existe proyecto para la orden."
+      ],
+      "atomic_actions": [
+        "Crear project.",
+        "Copiar el alcance inmutable y entregables base.",
+        "Agregar al líder como project_member.",
+        "Cargar plantilla seleccionada si existe.",
+        "Actualizar la orden a in_execution.",
+        "Crear entrada de bitácora."
+      ]
+    },
+    "scope_change": {
+      "trigger": "Cliente o equipo detecta una solicitud fuera del alcance base.",
+      "process": [
+        "Técnico o líder registra change_request.",
+        "Líder analiza impacto técnico, horas y fecha.",
+        "Comercial define decisión y costo.",
+        "Dirección o usuario autorizado aprueba cuando corresponda.",
+        "Si requiere cobro adicional, generar nueva cotización vinculada antes de autorizar.",
+        "Solo después de autorización se crean o modifican requerimientos y actividades.",
+        "Actualizar scope_version y bitácora sin borrar el alcance original."
+      ]
+    },
+    "project_close": {
+      "preconditions": [
+        "No existen actividades críticas abiertas, salvo excepción documentada.",
+        "Entregables obligatorios están accepted o existe aceptación de cierre con pendientes.",
+        "Pruebas críticas están passed o tienen excepción aprobada.",
+        "Se registró evidencia de entrega.",
+        "Se registraron accesos, documentación o pendientes aplicables.",
+        "Se definió fecha de inicio y fin de garantía."
+      ],
+      "actions": [
+        "Marcar project.situation como completed.",
+        "Guardar completed_at.",
+        "Actualizar work_order.status a delivered.",
+        "Crear entrada de cierre en bitácora."
+      ]
+    },
+    "payment_registration": {
+      "process": [
+        "Crear payment en estado registered.",
+        "Aplicar el cobro a una o varias facturas.",
+        "Confirmar el cobro y crear transaction de ingreso vinculada.",
+        "Recalcular paid_amount, balance y status de cada factura.",
+        "Recalcular cobranza de orden y cliente.",
+        "Liberar comisión proporcional cuando aplique."
+      ]
+    }
+  },
+  "business_rules": [
+    {
+      "id": "BR-001",
+      "rule": "No se puede aceptar una cotización vencida sin extender vigencia o crear nueva versión."
+    },
+    {
+      "id": "BR-002",
+      "rule": "Una cotización aceptada es inmutable."
+    },
+    {
+      "id": "BR-003",
+      "rule": "En el MVP una cotización aceptada genera una sola orden y una orden genera un solo proyecto."
+    },
+    {
+      "id": "BR-004",
+      "rule": "El técnico no puede modificar precios, comisiones, cobros ni el alcance base."
+    },
+    {
+      "id": "BR-005",
+      "rule": "Un requerimiento no puede pasar a development sin descripción y criterio de aceptación."
+    },
+    {
+      "id": "BR-006",
+      "rule": "Una actividad bloqueada requiere motivo de bloqueo."
+    },
+    {
+      "id": "BR-007",
+      "rule": "Una actividad marcada done debe tener checklist obligatorio completo."
+    },
+    {
+      "id": "BR-008",
+      "rule": "Las horas registradas deben ser mayores que cero, no superar 24 por día por usuario y conservar el costo por hora vigente como snapshot."
+    },
+    {
+      "id": "BR-009",
+      "rule": "Una prueba failed requiere resultado obtenido y resumen de incidencia."
+    },
+    {
+      "id": "BR-010",
+      "rule": "Un entregable accepted requiere nombre de quien acepta y fecha."
+    },
+    {
+      "id": "BR-011",
+      "rule": "Un cambio de alcance no puede implementarse hasta quedar authorized."
+    },
+    {
+      "id": "BR-012",
+      "rule": "La suma de cobros aplicados no puede superar el importe del cobro ni el saldo de las facturas."
+    },
+    {
+      "id": "BR-013",
+      "rule": "Un movimiento financiero reconciled no puede editarse ni eliminarse."
+    },
+    {
+      "id": "BR-014",
+      "rule": "Cancelar o revertir operaciones críticas exige motivo y genera auditoría."
+    },
+    {
+      "id": "BR-015",
+      "rule": "Los importes vendidos, facturados y cobrados se calculan y muestran por separado."
+    },
+    {
+      "id": "BR-016",
+      "rule": "Los datos de una organización nunca son visibles para usuarios de otra organización."
+    }
+  ],
+  "calculations": {
+    "quote": {
+      "line_total": "quantity * unit_price",
+      "subtotal": "sum(quote_items.line_total) - discount",
+      "tax": "subtotal * tax_rate / 100",
+      "total": "subtotal + tax"
+    },
+    "project_progress": "Si existen tareas: sum(weight de tareas done) / sum(weight de todas las tareas no canceladas) * 100; si no existen tareas, 0.",
+    "project_actual_hours": "sum(time_entries.hours where project_id = project.id)",
+    "project_labor_cost": "sum(time_entries.total_cost where project_id = project.id)",
+    "project_direct_cost": "sum(financial_transactions.amount where type = expense and project_id = project.id and status in confirmed,reconciled)",
+    "project_total_cost": "project_labor_cost + project_direct_cost",
+    "sold_margin": "work_order.sold_subtotal - project_total_cost",
+    "sold_margin_percent": "if work_order.sold_subtotal > 0 then sold_margin / work_order.sold_subtotal * 100 else 0",
+    "invoiced_amount": "sum(non_cancelled invoices.total for work_order)",
+    "collected_amount": "sum(confirmed payment_allocations.amount for invoices of work_order)",
+    "invoice_balance": "invoice.total - sum(confirmed payment_allocations.amount)",
+    "account_balance": "opening_balance + confirmed inflows - confirmed outflows",
+    "commission_estimated": "commission.base_amount * commission.rate / 100",
+    "commission_released": "commission.estimated_amount * collected_amount / work_order.sold_total, capped at commission.estimated_amount",
+    "health_default": {
+      "delayed": "Today is after effective due date and project is not completed.",
+      "at_risk": "Project is active, due in 5 calendar days or less and progress is below 80 percent, or has blocked high priority tasks.",
+      "on_track": "Otherwise.",
+      "override": "Project lead may override health only with a reason; retain calculated health and manual health separately if practical."
+    }
+  },
+  "screens": [
+    {
+      "route": "/login",
+      "name": "Acceso",
+      "minimum_features": [
+        "Inicio de sesión",
+        "Recuperación de acceso si el proveedor de autenticación lo soporta"
+      ]
+    },
+    {
+      "route": "/dashboard",
+      "name": "Panel principal",
+      "minimum_features": [
+        "Indicadores por rol",
+        "Pendientes",
+        "Alertas",
+        "Accesos rápidos"
+      ]
+    },
+    {
+      "route": "/clients",
+      "name": "Clientes",
+      "minimum_features": [
+        "Listado",
+        "Alta",
+        "Edición",
+        "Contactos",
+        "Expediente 360"
+      ]
+    },
+    {
+      "route": "/commercial/leads",
+      "name": "Prospectos",
+      "minimum_features": [
+        "Listado y pipeline",
+        "Seguimientos",
+        "Próxima actividad",
+        "Conversión a cliente"
+      ]
+    },
+    {
+      "route": "/commercial/quotes",
+      "name": "Cotizaciones",
+      "minimum_features": [
+        "Crear",
+        "Versionar",
+        "Calcular importes",
+        "Cambiar estatus",
+        "Aceptar y generar orden",
+        "Vista imprimible"
+      ]
+    },
+    {
+      "route": "/commercial/work-orders",
+      "name": "Órdenes de servicio",
+      "minimum_features": [
+        "Expediente administrativo",
+        "Autorizar inicio",
+        "Resumen de proyecto",
+        "Facturas",
+        "Cobros",
+        "Cierre"
+      ]
+    },
+    {
+      "route": "/commercial/invoices",
+      "name": "Facturas",
+      "minimum_features": [
+        "Registrar factura externa",
+        "Adjuntar PDF y XML",
+        "Vencimiento",
+        "Saldo",
+        "Cobros"
+      ]
+    },
+    {
+      "route": "/projects",
+      "name": "Proyectos",
+      "minimum_features": [
+        "Listado",
+        "Filtros por responsable, etapa, situación y salud",
+        "Vista de proyectos en riesgo"
+      ]
+    },
+    {
+      "route": "/projects/[id]",
+      "name": "Detalle de proyecto",
+      "minimum_features": [
+        "Resumen",
+        "Alcance",
+        "Requerimientos",
+        "Actividades",
+        "Tiempos",
+        "Evidencias",
+        "Pruebas",
+        "Entregables",
+        "Cambios de alcance",
+        "Bitácora"
+      ]
+    },
+    {
+      "route": "/finance",
+      "name": "Finanzas",
+      "minimum_features": [
+        "Saldos",
+        "Ingresos",
+        "Egresos",
+        "Cobranza",
+        "Cuentas por pagar",
+        "Rentabilidad por proyecto"
+      ]
+    },
+    {
+      "route": "/administration",
+      "name": "Administración",
+      "minimum_features": [
+        "Usuarios",
+        "Roles",
+        "Catálogos",
+        "Plantillas de proyecto",
+        "Folios",
+        "Configuración"
+      ]
+    }
+  ],
+  "notifications": {
+    "mvp_delivery_channel": "Centro de notificaciones dentro de la aplicación; no enviar correo ni WhatsApp.",
+    "events": [
+      "Prospecto sin próxima actividad.",
+      "Cotización próxima a vencer.",
+      "Orden pendiente de anticipo o información.",
+      "Actividad asignada.",
+      "Actividad próxima a vencer o vencida.",
+      "Actividad bloqueada.",
+      "Proyecto en riesgo o retrasado.",
+      "Entregable próximo o con observaciones.",
+      "Cambio de alcance pendiente de revisión.",
+      "Factura próxima a vencer o vencida."
+    ]
+  },
+  "reports": [
+    "Pipeline y valor de oportunidades por vendedor y estatus.",
+    "Cotizaciones enviadas, aceptadas, rechazadas y tasa de cierre.",
+    "Órdenes por estado.",
+    "Proyectos por etapa, situación y salud.",
+    "Horas estimadas contra reales por proyecto y técnico.",
+    "Actividades vencidas y bloqueadas.",
+    "Facturado, cobrado y saldo pendiente por cliente y orden.",
+    "Ingresos y egresos por mes y categoría.",
+    "Rentabilidad por proyecto.",
+    "Comisiones estimadas, liberadas y pagadas."
+  ],
+  "non_functional_requirements": {
+    "security": [
+      "Autenticación obligatoria.",
+      "Autorización por rol en servidor.",
+      "Aislamiento por organization_id y RLS si la plataforma lo soporta.",
+      "URLs firmadas o privadas para archivos.",
+      "No registrar secretos, contraseñas o contenido sensible en logs.",
+      "Validar tipo y tamaño de archivos.",
+      "Protección contra inyección, XSS, CSRF y acceso directo no autorizado."
+    ],
+    "reliability": [
+      "Transacciones de base de datos para conversiones críticas.",
+      "Acciones idempotentes para aceptar cotización, crear orden, crear proyecto y confirmar cobro.",
+      "Manejo visible de errores sin dejar datos parciales.",
+      "Migraciones reversibles cuando sea razonable."
+    ],
+    "performance": [
+      "Listados paginados.",
+      "Consultas del dashboard agregadas y con índices.",
+      "Evitar cargar archivos completos para mostrar listados.",
+      "Objetivo de respuesta menor a 2 segundos en operaciones comunes con datos de prueba."
+    ],
+    "accessibility": [
+      "Navegación por teclado.",
+      "Etiquetas de formulario.",
+      "Contraste suficiente.",
+      "Estados no comunicados únicamente mediante color."
+    ]
+  },
+  "seed_data": {
+    "organization": "Vector IA Demo",
+    "users": [
+      "Dirección Demo",
+      "Vendedor Demo",
+      "Administración Demo",
+      "Líder Técnico Demo",
+      "Técnico Demo"
+    ],
+    "clients": 3,
+    "leads": 6,
+    "quotes": 4,
+    "work_orders": 2,
+    "projects": 2,
+    "financial_accounts": [
+      "Banco principal",
+      "Caja chica"
+    ],
+    "financial_categories": [
+      "Venta de desarrollo",
+      "Venta de soporte",
+      "Licencias",
+      "Servicios externos",
+      "Publicidad",
+      "Nómina",
+      "Gastos administrativos",
+      "Aportación de socio",
+      "Retiro de socio",
+      "Transferencia interna"
+    ],
+    "project_templates": [
+      "Desarrollo de sistema nuevo",
+      "Automatización con IA",
+      "Mantenimiento o soporte"
+    ]
+  },
+  "acceptance_scenarios": [
+    {
+      "id": "AC-001",
+      "scenario": "Flujo comercial completo",
+      "given": "Un vendedor autenticado y un prospecto nuevo.",
+      "when": "Crea cliente, cotiza, envía, registra aceptación y convierte.",
+      "then": "La cotización queda bloqueada, la oportunidad queda ganada y se crea exactamente una orden con importes y alcance correctos."
+    },
+    {
+      "id": "AC-002",
+      "scenario": "Creación idempotente del proyecto",
+      "given": "Una orden con anticipo cumplido, líder técnico y estado autorizado.",
+      "when": "El usuario ejecuta dos veces la acción de crear proyecto.",
+      "then": "Existe un solo proyecto, con alcance copiado, líder asignado y bitácora."
+    },
+    {
+      "id": "AC-003",
+      "scenario": "Trabajo del técnico con permisos limitados",
+      "given": "Un técnico asignado al proyecto.",
+      "when": "Ingresa al sistema.",
+      "then": "Puede ver alcance, actividades y fechas, registrar tiempo y evidencia, pero no ve precios, márgenes, cuentas o comisiones."
+    },
+    {
+      "id": "AC-004",
+      "scenario": "Control de requerimientos",
+      "given": "Un requerimiento sin criterio de aceptación.",
+      "when": "Se intenta mover a desarrollo.",
+      "then": "El sistema bloquea la transición e indica el dato faltante."
+    },
+    {
+      "id": "AC-005",
+      "scenario": "Cambio de alcance",
+      "given": "El cliente solicita una función no incluida.",
+      "when": "El técnico registra el cambio.",
+      "then": "El cambio queda pendiente de análisis y no puede integrarse a requerimientos aprobados hasta su autorización."
+    },
+    {
+      "id": "AC-006",
+      "scenario": "Horas y costo",
+      "given": "Un técnico con costo interno por hora y una actividad asignada.",
+      "when": "Registra horas.",
+      "then": "El sistema conserva el costo por hora como snapshot, actualiza horas reales y recalcula costo y margen del proyecto."
+    },
+    {
+      "id": "AC-007",
+      "scenario": "Cierre técnico",
+      "given": "Un proyecto con actividades críticas terminadas, pruebas aprobadas y entregables aceptados.",
+      "when": "El líder cierra el proyecto.",
+      "then": "El proyecto queda completed, la orden queda delivered y se genera bitácora de cierre."
+    },
+    {
+      "id": "AC-008",
+      "scenario": "Facturación y cobro parcial",
+      "given": "Una orden de 100000 MXN con una factura emitida por el mismo total.",
+      "when": "Administración registra y aplica un cobro de 40000 MXN.",
+      "then": "La factura queda partially_paid, el saldo es 60000 MXN, se registra el ingreso y se libera la comisión proporcional."
+    },
+    {
+      "id": "AC-009",
+      "scenario": "Aislamiento de organización",
+      "given": "Usuarios de dos organizaciones distintas en datos de prueba.",
+      "when": "Un usuario intenta consultar por URL o API un registro ajeno.",
+      "then": "El sistema responde acceso denegado o no encontrado y no filtra información."
+    },
+    {
+      "id": "AC-010",
+      "scenario": "Auditoría",
+      "given": "Una operación crítica existente.",
+      "when": "Un usuario autorizado la cancela o revierte.",
+      "then": "El sistema exige motivo, conserva el registro y crea audit_log con antes y después."
+    }
+  ],
+  "implementation_plan": [
+    {
+      "phase": 0,
+      "name": "Inspección y diseño técnico",
+      "deliverables": [
+        "Inventario del repositorio.",
+        "Decisiones de arquitectura.",
+        "Mapa de rutas y modelo de datos.",
+        "Plan de migraciones y pruebas."
+      ]
+    },
+    {
+      "phase": 1,
+      "name": "Base de aplicación",
+      "deliverables": [
+        "Autenticación.",
+        "Organización.",
+        "Usuarios y roles.",
+        "Layout y navegación.",
+        "Clientes y contactos.",
+        "Auditoría base."
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "Flujo comercial",
+      "deliverables": [
+        "Prospectos y actividades.",
+        "Cotizaciones y versiones.",
+        "Aceptación.",
+        "Órdenes de servicio.",
+        "Comisiones estimadas."
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "Corazón de proyectos",
+      "deliverables": [
+        "Creación desde orden.",
+        "Resumen y alcance.",
+        "Equipo.",
+        "Requerimientos.",
+        "Actividades y checklist.",
+        "Tiempos.",
+        "Evidencias.",
+        "Pruebas.",
+        "Entregables.",
+        "Cambios de alcance.",
+        "Bitácora.",
+        "Cierre técnico."
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "Finanzas básicas",
+      "deliverables": [
+        "Cuentas y categorías.",
+        "Facturas externas.",
+        "Cobros y aplicaciones.",
+        "Ingresos y egresos.",
+        "Cuentas por pagar.",
+        "Comisiones liberadas.",
+        "Rentabilidad por proyecto."
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "Paneles, reportes y estabilización",
+      "deliverables": [
+        "Dashboard por rol.",
+        "Alertas internas.",
+        "Reportes del MVP.",
+        "Pruebas end-to-end.",
+        "Revisión de seguridad y permisos.",
+        "Datos semilla.",
+        "Documentación final."
+      ]
+    }
+  ],
+  "definition_of_done": [
+    "El flujo principal funciona de principio a fin con datos persistentes.",
+    "Las migraciones se ejecutan desde cero sin errores.",
+    "Los permisos se validan en servidor y pasan pruebas.",
+    "Las reglas de negocio críticas tienen pruebas automatizadas.",
+    "Existe al menos una prueba end-to-end del flujo principal.",
+    "Los listados tienen filtros, estados vacíos, carga y manejo de errores.",
+    "Los formularios validan campos y muestran mensajes en español.",
+    "Los importes se calculan con decimal y sin errores de punto flotante.",
+    "Las acciones críticas son idempotentes y generan auditoría.",
+    "El README permite a otro desarrollador instalar y ejecutar el sistema.",
+    "No quedan credenciales, secretos o datos reales en el repositorio.",
+    "Todo pendiente o simplificación se documenta explícitamente."
+  ],
+  "future_backlog": [
+    "Timbrado SAT mediante proveedor autorizado.",
+    "Conciliación bancaria.",
+    "Portal del cliente para aceptar cotizaciones y entregables.",
+    "Firma digital.",
+    "Notificaciones por correo y WhatsApp.",
+    "Integración con repositorios y despliegues.",
+    "Soporte y garantía tipo tickets.",
+    "Contratos recurrentes y suscripciones.",
+    "Múltiples proyectos por orden.",
+    "Cotizaciones adicionales generadas desde cambios de alcance.",
+    "Exportación avanzada a Excel y PDF.",
+    "IA para convertir reuniones en requerimientos.",
+    "IA para sugerir criterios de aceptación y pruebas.",
+    "IA para resúmenes de avance y detección de riesgos.",
+    "IA para estimaciones basadas en proyectos históricos."
+  ]
+}
