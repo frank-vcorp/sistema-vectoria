@@ -1,7 +1,7 @@
 # INDEX · Vector IA — Discovery
 
-**Versión:** 2026-08-17
-**Estado del discovery:** cerrado a nivel de descubrimiento. **NO cerrado para handoff a INTEGRA** hasta que Frank responda las 5 contradicciones P0 en `PREGUNTAS-ABIERTAS.md`.
+**Versión:** 2026-08-17 (actualizado 22:00)
+**Estado del discovery:** cerrado a nivel de descubrimiento. **`conditionally_ready` para handoff a INTEGRA** — las 6 contradicciones P0 están resueltas; las 5 preguntas NB no son bloqueantes; las 5 OOS operativas no son de discovery; las 150+ reglas referenciadas se reconstruirán en sesión dedicada (DEC-FUN-20260817-52).
 
 ---
 
@@ -46,16 +46,16 @@ Status: consolidado; **NO** es especificación técnica.
 
 ## 4. Bloqueadores para handoff a INTEGRA
 
-| # | Bloqueador | Severidad | Acción |
+| # | Bloqueador | Severidad | Estado al 2026-08-17 22:00 |
 |---|---|---|---|
-| 1 | Vocabulario único de estados de módulo | P0 | Responder Q-P0-1 |
-| 2 | Cotización multi-línea vs 1 línea | P0 | Responder Q-P0-2 |
-| 3 | Base de la comisión (facturado vs cobrado) | P0 | Responder Q-P0-3 |
-| 4 | Timbrado CFDI (real vs externo) | P0 | Responder Q-P0-4 |
-| 5 | Conteos (decisiones / reglas / módulos) | P0 | Responder Q-P0-5 |
-| 6 | Archivo `DECISIONES-V1-20260815.md` no localizado | P0 | Responder Q-P0-6 |
+| 1 | Vocabulario único de estados de módulo | P0 | ✅ Resuelto (DEC-FUN-20260817-47) |
+| 2 | Cotización multi-línea vs 1 línea | P0 | ✅ Resuelto (DEC-FUN-20260817-48) |
+| 3 | Base de la comisión (facturado vs cobrado) | P0 | ✅ Resuelto (DEC-FUN-20260817-49) |
+| 4 | Timbrado CFDI (real vs externo) | P0 | ✅ Resuelto (DEC-FUN-20260817-50) |
+| 5 | Conteos (decisiones / reglas / módulos) | P0 | ✅ Resuelto (DEC-FUN-20260817-51) |
+| 6 | Archivo `DECISIONES-V1-20260815.md` no localizado | P0 | ✅ Plan confirmado (DEC-FUN-20260817-52) — reconstrucción en sesión dedicada posterior |
 
-**Mientras estos 6 puntos P0 no estén resueltos, ATLAS no emite `FUNCTIONAL-HANDOFF` a INTEGRA.**
+**Las 6 contradicciones P0 están RESUELTAS.** El handoff a INTEGRA puede emitirse como `conditionally_ready`: las 31 reglas con ID confirmado son el subconjunto firme del contrato, y las 150+ restantes se incorporan cuando se complete la reconstrucción.
 
 ---
 
@@ -92,14 +92,15 @@ Ver `PREGUNTAS-ABIERTAS.md` sección NB:
 
 ## 8. Handoff
 
-- **Estado actual:** `conditionally_ready` (consolidación funcional hecha, faltan respuestas P0).
-- **Próximo paso:** Frank responde las 5+1 preguntas P0 en `PREGUNTAS-ABIERTAS.md`.
-- **Cuando Frank responda:** ATLAS consolida respuestas, actualiza HALLAZGOS / DECISIONES-FUNCIONALES / FUNCTIONAL-BASELINE y emite `FUNCTIONAL-HANDOFF` a INTEGRA.
+- **Estado actual:** `conditionally_ready` — consolidación funcional hecha, 6 contradicciones P0 resueltas, plan para 150+ reglas en sesión futura.
+- **Próximo paso:** Frank OK de commit del delta actual; sesión dedicada para reconstruir las 150+ reglas (Q-P0-6 / DEC-FUN-20260817-52).
+- **Cuando Frank apruebe:** ATLAS emite `FUNCTIONAL-HANDOFF` a INTEGRA con el subconjunto firme (31 reglas con ID + las 52 decisiones) y la advertencia de las 150+ pendientes.
 
 ---
 
 ## 9. Cambios respecto al estado anterior
 
+### Cambio 1 (c9ab8e3 → b615379): reorganización inicial
 | Antes (c9ab8e3) | Ahora |
 |---|---|
 | `PROYECTO.md` único | `FUNCTIONAL-BASELINE.md` canónico + 10 documentos funcionales especializados |
@@ -112,10 +113,17 @@ Ver `PREGUNTAS-ABIERTAS.md` sección NB:
 | Sin preguntas estructuradas | `PREGUNTAS-ABIERTAS.md` con 6 P0 y 5 NB |
 | Reglas dispersas | `REGLAS-DE-NEGOCIO.md` con tabla consolidada y cálculos |
 
+### Cambio 2 (b615379 → pendiente): cierre de las 6 P0
+- `DECISIONES-FUNCIONALES.md`: append de DEC-FUN-20260817-47 a -52 (las 6 decisiones nuevas).
+- `REGLAS-DE-NEGOCIO.md`: aviso de vocabulario único + nota sobre 150+ reglas con plan.
+- `HALLAZGOS.md`: 5 contradicciones P0/P1 marcadas `resolved` con la decisión que las cierra; H-06 marcada `confirmed (con plan)`.
+- `ESTADO-FUNCIONAL.md`: estado pasa a `conditionally_ready` para handoff a INTEGRA.
+- `INDEX.md`: tabla de bloqueadores actualizada, handoff a `conditionally_ready`.
+
 ---
 
 ## 10. Para Frank
 
-- Revisar `HALLAZGOS.md` para entender el estado real de las contradicciones.
-- Responder las 6 preguntas P0 en `PREGUNTAS-ABIERTAS.md` (incluye opciones y recomendación ATLAS).
-- Indicar si quiere commitear la reorganización tal cual (todo el material está staged vía `git mv`; ningún commit realizado todavía).
+- Las 6 contradicciones P0 están resueltas; el delta está persistido en `DECISIONES-FUNCIONALES.md`, `REGLAS-DE-NEGOCIO.md`, `HALLAZGOS.md`, `ESTADO-FUNCIONAL.md`, `INDEX.md`.
+- Indicar si quiere commitear el delta actual (todo listo; ningún commit todavía).
+- Próxima sesión dedicada: reconstruir las 150+ reglas con ATLAS (DEC-FUN-20260817-52).

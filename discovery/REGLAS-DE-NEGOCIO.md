@@ -3,7 +3,9 @@
 **Versión:** 2026-08-17
 **Convención:** `BR-###` (regla original estable) y `BR-N###` (regla ratificada en sesiones posteriores). Mismas IDs del repositorio, sin renumerar.
 
-> **AVISO IMPORTANTE:** el documento `DECISIONES-V1-20260815.md` referenciado en versiones previas **no existe en el repositorio** (ver HALLAZGOS H-20260817-06). Esta lista contiene las **31 reglas con ID localizable**. Las 150+ reglas restantes se reconstruirán cuando Frank apruebe.
+> **AVISO IMPORTANTE (actualizado 2026-08-17 22:00):** el documento `DECISIONES-V1-20260815.md` referenciado en versiones previas **no existe en el repositorio** (HALLAZGOS H-20260817-06). Frank aprobó reconstruir las 150+ reglas restantes en sesión dedicada de discovery con ATLAS (DEC-FUN-20260817-52). Mientras tanto, esta lista de **31 reglas con ID localizable** es el **único conjunto de reglas firme** para handoff a INTEGRA.
+
+> **Vocabulario de estados de módulo (DEC-FUN-20260817-47):** vocabulario único vigente — `pending → in_progress → testing → deployed` (+ laterales `paused`, `blocked`, `cancelled`). Salud: `on_track / at_risk / delayed`. BR-N113 y BR-N114 usan este vocabulario.
 
 ---
 
@@ -30,8 +32,8 @@
 | BR-N33 v2 | **Comisiones sobre FACTURADO, no sobre COBRADO** (`liberada = estimada × Σ(facturas NO canceladas) / total_OS`) | FUNCTIONAL-BASELINE §10, §16 |
 | BR-N51 | Cotización requiere spec firmado | FUNCTIONAL-BASELINE §16 |
 | BR-N52 | Spec firmado es inmutable | FUNCTIONAL-BASELINE §16 |
-| BR-N113 | Módulo `deployed` requiere 4 checks (reqs validados, actividades con evidencia, tests passing, entregables aceptados) | FUNCTIONAL-BASELINE §16. ⚠️ Vocabulario a unificar (H-20260817-01). |
-| BR-N114 | Módulo `in_progress` requiere que sus `depends_on_modules` estén `deployed` | FUNCTIONAL-BASELINE §16. ⚠️ Vocabulario a unificar. |
+| BR-N113 | Módulo `deployed` requiere 4 checks (reqs validados, actividades con evidencia, tests passing, entregables aceptados) | FUNCTIONAL-BASELINE §16. ✅ Vocabulario unificado DEC-FUN-20260817-47. |
+| BR-N114 | Módulo `in_progress` requiere que sus `depends_on_modules` estén `deployed` | FUNCTIONAL-BASELINE §16. ✅ Vocabulario unificado DEC-FUN-20260817-47. |
 | BR-N121 | Suscripción requiere cobro inicial antes de autorizar proyecto | FUNCTIONAL-BASELINE §9.4, §16 |
 | BR-N123 | Comisiones se reversan si la factura se cancela | FUNCTIONAL-BASELINE §10.2, §16 |
 | BR-N127 | Roles seed no se eliminan | FUNCTIONAL-BASELINE §16 |

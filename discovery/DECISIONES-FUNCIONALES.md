@@ -194,3 +194,85 @@
 ## DEC-FUN-20260817-46 · Sistema multi-org latente
 - **Decisión:** la BD incluye `organization_id` en todas las entidades de negocio, aunque sólo exista una organización en MVP.
 - **Estado:** confirmed (regla estructural del JSON archive, no contradicha).
+
+---
+
+## DEC-FUN-20260817-47 · Vocabulario único de estados de módulo de proyecto (Q-P0-1)
+- **Pregunta:** ¿qué vocabulario único usamos para los estados de un módulo de proyecto?
+- **Opciones consideradas:**
+  1. `pending → in_progress → testing → deployed` (+ `paused`, `blocked`, `cancelled`) con salud `on_track / at_risk / delayed`.
+  2. `pending → en_curso → en_pruebas → implementado → pospuesto` (+ `paused`, `cancelled`) con salud `en_tiempo / en_riesgo / retrasado`.
+  3. Otro vocabulario.
+- **Decisión:** opción 1.
+- **Razón:** coherente con BR-N113/114 ya escritos, conciso, fácil de programar y probar, alineado con vocabulario estándar de proyectos técnicos.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Implicación:** INTEGRA recibe un enum único de 7 valores para `status` y 3 para `health`. Las reglas BR-N113/114 mantienen su semántica; sólo se confirma el nombre canónico de los estados. La simulación del 17-ago se rehará contra este vocabulario.
+- **Reemplaza a:** vocabulario `pending / en_curso / en_pruebas / implementado / pospuesto` de FUNCTIONAL-BASELINE §18.
+
+## DEC-FUN-20260817-48 · Cotización multi-línea confirmada (Q-P0-2)
+- **Pregunta:** ¿la cotización es multi-línea o de 1 sola línea con monto global?
+- **Opciones consideradas:**
+  1. Multi-línea (con items auto-pre-llenados desde spec + catálogo, descuentos por línea + descuento global).
+  2. 1 línea, monto global (restaurar la restricción original de DISCOVERY-01).
+  3. Híbrido configurable (Director define por cotización).
+- **Decisión:** opción 1.
+- **Razón:** consistente con la decisión ratificada 24-ago, con el JSON archive (que conserva `quote_items`) y con la simulación del 17-ago (que asume multi-línea).
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Implicación:** el módulo Comercial implementa `quote_items` polimórficos (`service | license | expense | discount`) con cálculo por línea y totales agregados. Catálogo de servicios alimenta líneas automáticamente.
+- **Reemplaza a:** la restricción "Cotización 1 línea, monto global" de DISCOVERY-20260814-01 §Restricción Crítica 1.
+
+## DEC-FUN-20260817-49 · Comisión sobre FACTURADO confirmada (Q-P0-3)
+- **Pregunta:** ¿sobre qué base se calcula y libera la comisión del vendedor?
+- **Opciones consideradas:**
+  1. Sobre FACTURADO (BR-N33 v2: `comision.liberada = estimada × Σ(facturas NO canceladas) / total_OS`).
+  2. Sobre COBRADO (fórmula del JSON archive).
+  3. Configurable por OS.
+- **Decisión:** opción 1.
+- **Razón:** BR-N33 v2 ratificada 17-ago como parte de las decisiones tácticas/estructurales. La regla vigente confirmada. Coherente con BR-N123 (reversa al cancelar factura) y con el flujo de ingresos.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Implicación:** la comisión se libera al facturar (no al cobrar). El JSON archive queda `superseded` para la regla de comisión. La simulación del 17-ago se rehará; el PASO 9.1 tenía el error de mezclar ambas bases.
+- **Reemplaza a:** fórmula sobre cobrado del `vectoria_especificacion_..._mvp.json` archive.
+
+## DEC-FUN-20260817-50 · Timbrado CFDI real con FacturoPorTi confirmado (Q-P0-4)
+- **Pregunta:** ¿el sistema timbra CFDI directamente o sólo registra facturas externas?
+- **Opciones consideradas:**
+  1. Timbrado real con FacturoPorTi (sistema arma JSON CFDI 4.0, lo envía al PAC y guarda UUID/XML/PDF).
+  2. CFDI externo (sólo registro, sin PAC).
+  3. Configurable por organización.
+- **Decisión:** opción 1.
+- **Razón:** decisión estructural #10 ratificada 17-ago. La empresa es cliente real de FacturoPorTi. La integración reduce pasos manuales y errores de captura.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Implicación:** INTEGRA debe diseñar contrato de integración con PAC, manejo seguro de CSD (.cer + .pem + password) y API key encriptados, y el flujo de cancelación con motivo SAT (01-04). El JSON archive queda `superseded` para el alcance de facturación.
+- **Reemplaza a:** la regla "no implementar conexión directa con SAT" del `vectoria_especificacion_..._mvp.json` archive.
+
+## DEC-FUN-20260817-51 · Conteos definitivos confirmados (Q-P0-5)
+- **Pregunta:** ¿qué conteos de decisiones / reglas / módulos quedan como definitivos?
+- **Opciones consideradas:**
+  1. Conteos ATLAS: 52 decisiones (23+23+6) · 7 módulos visibles + Hoy + Administración/Plantillas/Catálogo · 31 reglas con ID localizable (las 150+ referenciadas quedan pendientes de reconstruir).
+  2. Conteos DISCOVERY-01: 34 decisiones · 6-7 módulos · 150+ reglas referenciadas.
+  3. Otro conteo.
+- **Decisión:** opción 1.
+- **Razón:** los conteos ATLAS son los más recientes y trazables a sesiones específicas; se alinean con la decisión de reconstruir las 150+ reglas (Q-P0-6 opción 2).
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Implicación:** las cifras 52 / 7+1+1 / 31 son el lineamiento vigente. La cifra 150+ deja de ser referencia firme hasta que se reconstruya (siguiente sesión de discovery). Cabeceras de otros documentos que digan lo contrario se actualizan al consolidar.
+- **Reemplaza a:** las cifras oscilantes 34/40/46/52 (decisiones), 6/7/8/9 (módulos) que aparecían en distintos documentos.
+
+## DEC-FUN-20260817-52 · Reconstruir las 150+ reglas con ATLAS (Q-P0-6)
+- **Pregunta:** ¿qué hacemos con las 150+ reglas que referencia `DECISIONES-V1-20260815.md` y que no existen en el repo?
+- **Opciones consideradas:**
+  1. Frank provee el archivo o su contenido para restaurar.
+  2. Reconstruir con ATLAS en sesión dirigida.
+  3. Eliminar la referencia y mantener sólo las 31 reglas con ID.
+- **Decisión:** opción 2.
+- **Razón:** no hay copia de respaldo localizada del archivo; las 150+ reglas se pueden reconstruir a partir de las sesiones 14-ago y 17-ago con un proceso dirigido (una regla a la vez). Mantiene la trazabilidad y consistencia con el resto del discovery.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Implicación:** se programa una sesión dedicada de discovery (no en este pase). ATLAS generará `discovery/REGLAS-V1-20260815-reconstruccion.md` o un archivo similar, una regla a la vez, validada por Frank. Mientras tanto, las 31 reglas con ID confirmado son el **único conjunto de reglas firme** para handoff a INTEGRA.
+- **Reemplaza a:** la referencia firme a `DECISIONES-V1-20260815.md` como contenedor de las 150+ reglas.
+
+---
+
+## Resumen de decisiones (al 2026-08-17)
+
+- **52 decisiones** ratificadas en discovery (las 46 originales + 6 nuevas DEC-FUN-20260817-47 a -52, resultado de la consolidación).
+- 6 decisiones de consolidación (Q-P0-1 a Q-P0-6) resueltas con recomendación ATLAS confirmada.
+- Estado del discovery: `ready_for_integra` (sujeto a la reconstrucción posterior de las 150+ reglas con ATLAS).

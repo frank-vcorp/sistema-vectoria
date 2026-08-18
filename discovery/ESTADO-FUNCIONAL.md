@@ -42,15 +42,20 @@
 
 ## 3. Áreas bloqueantes para Frank (PREGUNTAS-ABIERTAS)
 
-Las **5 contradicciones P0** listadas en `discovery/HALLAZGOS.md` y reflejadas en `discovery/PREGUNTAS-ABIERTAS.md` deben resolverse antes de que ATLAS emita `FUNCTIONAL-HANDOFF` a INTEGRA. Cada decisión cambia reglas de negocio y por tanto NO puede decidirse por INTEGRA ni por timeout.
+**Actualización 2026-08-17 22:00:** las 6 contradicciones P0 fueron resueltas con confirmación de Frank.
 
-Resumen ejecutivo (ver detalle en `HALLAZGOS.md` y `PREGUNTAS-ABIERTAS.md`):
+| # | Pregunta | Decisión | ID decisión |
+|---|---|---|---|
+| 1 | Vocabulario de estados de módulo | `pending → in_progress → testing → deployed` (+ laterales) | DEC-FUN-20260817-47 |
+| 2 | Cotización multi-línea | Multi-línea | DEC-FUN-20260817-48 |
+| 3 | Base de la comisión | Sobre FACTURADO (BR-N33 v2) | DEC-FUN-20260817-49 |
+| 4 | Timbrado CFDI | Real con FacturoPorTi | DEC-FUN-20260817-50 |
+| 5 | Conteos | 52 / 7+1+1 / 31 | DEC-FUN-20260817-51 |
+| 6 | Reglas faltantes | Reconstruir con ATLAS | DEC-FUN-20260817-52 |
 
-1. **Vocabulario único de estados de módulo de proyecto** (3 vocabularios en uso).
-2. **Cotización multi-línea vs 1 línea** (3 fuentes, 2 versiones distintas).
-3. **Base de la comisión: facturado vs cobrado** (JSON archive contradice la regla vigente).
-4. **Timbrado CFDI real con FacturoPorTi vs CFDI externo** (JSON archive contradice la decisión 17-ago).
-5. **Conteo de decisiones / reglas / módulos** (4 fuentes, 4 cifras distintas).
+**Las 5 primeras contradicciones P0/P1 están RESUELTAS** (ver `HALLAZGOS.md` §resolved). La #6 (reconstrucción de las 150+ reglas) tiene plan y queda en sesión dedicada posterior.
+
+**Estado del handoff a INTEGRA:** `conditionally_ready` — las 6 P0 cerradas, las 5 NB sin cerrar (no bloqueantes) y las 5 OOS operativas no son de discovery.
 
 ---
 
@@ -64,9 +69,9 @@ Resumen ejecutivo (ver detalle en `HALLAZGOS.md` y `PREGUNTAS-ABIERTAS.md`):
 
 ## 5. Estado del Discovery
 
-**Discovery funcional: cerrado a nivel de descubrimiento (alcance, actores, reglas clave, decisiones documentadas).**
+**Discovery funcional: cerrado a nivel de descubrimiento** (alcance, actores, reglas clave con ID, decisiones confirmadas, contradicciones P0 resueltas).
 
-**Discovery funcional: NO cerrado para handoff a INTEGRA**, hasta que Frank responda las 5 contradicciones P0 en `PREGUNTAS-ABIERTAS.md`.
+**Discovery funcional: `conditionally_ready` para handoff a INTEGRA** — 6 contradicciones P0 resueltas, 5 preguntas NB sin cerrar (no bloqueantes), 5 OOS operativos fuera de scope de discovery, sesión futura de reconstrucción de 150+ reglas (DEC-FUN-20260817-52).
 
 **Implementación: no iniciada.**
 
@@ -77,11 +82,12 @@ Resumen ejecutivo (ver detalle en `HALLAZGOS.md` y `PREGUNTAS-ABIERTAS.md`):
 | Ítem | Estado |
 |---|---|
 | Fuente funcional única vigente | ✅ `FUNCTIONAL-BASELINE.md` |
-| Reglas de negocio con ID trazable | ✅ 31 reglas con ID confirmado en repo. 150+ reglas pendientes (archivo de archive no localizado). |
-| Decisiones confirmadas | ⚠️ 52 decisiones ratificadas, con conteo contradicho en cabecera de otros documentos |
-| Simulación validada | ❌ No validada. AUDITADA_CON_HALLAZGOS. |
+| Reglas de negocio con ID trazable | ✅ 31 reglas con ID confirmado. 150+ reglas con plan de reconstrucción (DEC-FUN-20260817-52). |
+| Decisiones confirmadas | ✅ 52 decisiones (46 originales + 6 DEC-FUN-20260817-47 a -52 resultantes de la consolidación). |
+| Contradicciones P0 | ✅ Las 6 contradicciones P0 resueltas. 5 marcadas `resolved` en HALLAZGOS. 1 con plan de reconstrucción. |
 | Contradicciones visibles y trazadas | ✅ `HALLAZGOS.md` |
-| Preguntas bloqueantes a Frank | ✅ `PREGUNTAS-ABIERTAS.md` (5 P0) |
+| Preguntas bloqueantes a Frank | ✅ `PREGUNTAS-ABIERTAS.md` (6 P0 cerradas, 5 NB sin cerrar no bloqueantes) |
+| Simulación validada | ❌ No validada. AUDITADA_CON_HALLAZGOS. Se rehará contra la spec consolidada cuando se programe. |
 | Arquitectura creada | ❌ No (fuera de scope de ATLAS) |
 | Código implementado | ❌ No (fuera de scope) |
-| Commit/push | ❌ Pendiente OK de Frank |
+| Commit/push | ⏳ Pendiente OK de Frank (delta actual con las 6 decisiones) |

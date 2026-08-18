@@ -7,7 +7,7 @@
 
 ## H-20260817-01 · Vocabulario de estados de módulo de proyecto (P0)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P0 (bloqueante para handoff a INTEGRA)
 **Evidencia:**
 - `sessions/DISCOVERY-20260814-01.md` L137: estado `implementado` mencionado sin vocabulario completo.
@@ -19,16 +19,13 @@
 - Cualquier escenario de aceptación queda ambiguo.
 - Las simulaciones no pueden validar transiciones.
 
-**Propuesta ATLAS:** `pending → in_progress → testing → deployed` (+ laterales `paused`, `blocked`, `cancelled`).
-Salud del módulo: `on_track` / `at_risk` / `delayed`.
-
-**Acción:** Pregunta P0-1 en `PREGUNTAS-ABIERTAS.md`.
+**Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — `pending → in_progress → testing → deployed` (+ laterales `paused`, `blocked`, `cancelled`). Salud: `on_track / at_risk / delayed`. Decisión registrada como **DEC-FUN-20260817-47** en `DECISIONES-FUNCIONALES.md`. REGLAS-DE-NEGOCIO.md actualizado para reflejar el vocabulario canónico.
 
 ---
 
 ## H-20260817-02 · Cotización multi-línea vs 1 línea (P0)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P0
 **Evidencia:**
 - `sessions/DISCOVERY-20260814-01.md` L128: "Cotización 1 línea, monto global — sin catálogo de servicios, sin multi-línea, sin desglose de horas".
@@ -40,15 +37,13 @@ Salud del módulo: `on_track` / `at_risk` / `delayed`.
 - Reglas de cálculo, layout de pantalla, validación de ítems difieren.
 - Un agente implementador podría elegir cualquiera de las 3 versiones.
 
-**Recomendación ATLAS:** multi-línea (más reciente, consistente con el JSON, decisión 24-ago ratificada).
-
-**Acción:** Pregunta P0-2 en `PREGUNTAS-ABIERTAS.md`.
+**Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — cotización multi-línea. Decisión registrada como **DEC-FUN-20260817-48** en `DECISIONES-FUNCIONALES.md`. La restricción original de DISCOVERY-01 queda reemplazada.
 
 ---
 
 ## H-20260817-03 · Base de la comisión (P1)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P1 (importante, contradice regla vigente confirmada)
 **Evidencia:**
 - `archive/borradores-mixtos/vectoria_especificacion_sistema_administrativo_mvp.json` L1353: `commission_released = estimated × collected_amount / sold_total` (sobre **cobrado**).
@@ -60,15 +55,13 @@ Salud del módulo: `on_track` / `at_risk` / `delayed`.
 - Diferencias en escenarios de prueba de QA.
 - La simulación del flujo ya arrastró el conflicto.
 
-**Recomendación ATLAS:** regla vigente confirmada es **sobre FACTURADO**. El JSON archive debe quedar marcado `superseded` y no se usa para implementación.
-
-**Acción:** Pregunta P0-3 en `PREGUNTAS-ABIERTAS.md`.
+**Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — comisión sobre FACTURADO (BR-N33 v2). Decisión registrada como **DEC-FUN-20260817-49** en `DECISIONES-FUNCIONALES.md`. La fórmula del JSON archive queda `superseded`. La simulación del 17-ago se rehará con la fórmula correcta.
 
 ---
 
 ## H-20260817-04 · Timbrado CFDI: real vs externo (P1)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P1
 **Evidencia:**
 - `archive/borradores-mixtos/vectoria_especificacion_sistema_administrativo_mvp.json` (scope): "no implementar conexión directa con SAT, bancos, WhatsApp, correo o firma electrónica certificada" en el MVP.
@@ -79,15 +72,13 @@ Salud del módulo: `on_track` / `at_risk` / `delayed`.
 - Decisiones de seguridad, manejo de CSD/API key, integraciones externas.
 - INTEGRA no puede decidir el contrato de facturación sin ratificación.
 
-**Recomendación ATLAS:** la decisión vigente es **timbrado real con FacturoPorTi** (ratificada sesión 17-ago). Documento archive queda `superseded`.
-
-**Acción:** Pregunta P0-4 en `PREGUNTAS-ABIERTAS.md`.
+**Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — timbrado real con FacturoPorTi. Decisión registrada como **DEC-FUN-20260817-50** en `DECISIONES-FUNCIONALES.md`. El JSON archive queda `superseded` para el alcance de facturación. INTEGRA diseñará el contrato de integración con PAC, manejo seguro de CSD y API key, y el flujo de cancelación con motivo SAT (01-04).
 
 ---
 
 ## H-20260817-05 · Conteo de decisiones / reglas / módulos (P0)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P0 (afecta credibilidad del baseline)
 **Evidencia:**
 - `sessions/DISCOVERY-20260814-01.md` L137: "34 decisiones cerradas".
@@ -101,13 +92,13 @@ Salud del módulo: `on_track` / `at_risk` / `delayed`.
 - INTEGRA no puede confiar en el baseline si los conteos no se reproducen.
 - Métricas de readiness quedan opacas.
 
-**Acción:** Pregunta P0-5 en `PREGUNTAS-ABIERTAS.md`.
+**Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — conteos ATLAS: 52 decisiones (23+23+6) · 7 módulos visibles + Hoy + Administración/Plantillas/Catálogo · 31 reglas con ID localizable (150+ pendientes de reconstruir). Decisión registrada como **DEC-FUN-20260817-51** en `DECISIONES-FUNCIONALES.md`.
 
 ---
 
 ## H-20260817-06 · Archivo `DECISIONES-V1-20260815.md` no localizado (P0)
 
-**Estado:** candidate
+**Estado:** confirmed (con plan)
 **Severidad:** P0
 **Evidencia:**
 - `FUNCTIONAL-BASELINE.md` L772: "(150+ reglas totales documentadas en `DECISIONES-V1-20260815.md`)".
@@ -118,7 +109,12 @@ Salud del módulo: `on_track` / `at_risk` / `delayed`.
 - FUNCTIONAL-BASELINE.md §12 sólo lista 31 reglas con ID trazable.
 - INTEGRA no tiene un registro canónico de reglas para el contrato.
 
-**Acción:** Frank debe decidir si (a) el archivo existe en otro lado y se restaura, o (b) se reconstruye desde la sesión 17-ago. Bloqueante.
+**Resolución (2026-08-17 22:00):** Frank aprobó **opción 2** — reconstruir las 150+ reglas con ATLAS en sesión dedicada de discovery dirigida. Decisión registrada como **DEC-FUN-20260817-52** en `DECISIONES-FUNCIONALES.md`. Plan:
+1. Sesión posterior (no en este pase) abre `discovery/REGLAS-V1-20260815-reconstruccion.md` como cuaderno de trabajo.
+2. ATLAS propone reglas una a una, Frank confirma o corrige.
+3. Al cerrar, las reglas con nuevo ID se incorporan a `REGLAS-DE-NEGOCIO.md` y al contrato de handoff.
+
+**Mientras tanto:** las **31 reglas con ID confirmado** son el único conjunto firme para handoff a INTEGRA. Esto NO bloquea el handoff si INTEGRA acepta trabajar contra ese subconjunto y ampliarlo cuando se complete la reconstrucción.
 
 ---
 
