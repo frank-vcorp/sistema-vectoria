@@ -1,214 +1,347 @@
 # FLUJOS-FUNCIONALES · Vector IA
 
-**Versión:** 2026-08-17
-**Convención:** los flujos se describen en lenguaje natural, sin tablas físicas ni endpoints. Los estados se referencian por nombre, no por valor de enum (queda pendiente la unificación de vocabulario — ver HALLAZGOS H-20260817-01).
+**Versión:** 2026-08-17 23:20
+**Estado:** vigente y listo para handoff funcional.
+**Convención:** describe comportamiento observable, actores, precondiciones, evidencia y resultados. No define tablas, endpoints, arquitectura ni stack.
 
 ---
 
-## 1. Flujo principal (happy path, alto nivel)
+## 1. Flujo principal
 
-```
+### Catálogo de flujos
+
+| ID | Flujo |
+|---|---|
+| FLOW-COM-01 | Cuestionario → alcance firmado → cotización → OS |
+| FLOW-OS-01 | Anticipo/información → autorización → creación del Proyecto |
+| FLOW-PROJ-01 | Planeación → desarrollo → pruebas → validación → entrega |
+| FLOW-PROJ-02 | Incorporación y asignación del equipo |
+| FLOW-PROJ-03 | Exportación, revisión e importación del JSON Discovery |
+| FLOW-PROJ-04 | Solicitud y ejecución de cambio de alcance |
+| FLOW-PROJ-05 | Cierre técnico → OS entregada → cierre administrativo |
+
+```text
 Prospecto
-  → Cuestionario de sondeo
-  → Spec (generado por el sistema, revisado y firmado por PL)
-  → Cotización (multi-línea)
-  → Aceptación de cotización (con evidencia)
-  → Orden de Servicio creada
-  → Cobro de anticipo
-  → Autorización de inicio de OS
-  → Proyecto creado (workflow atómico, con snapshot del scope)
-  → Descomposición en módulos (JSON Discovery)
-  → Ejecución módulo por módulo (tareas → tests → entregables)
-  → Cambios de alcance (si los hay)
-  → Cierre técnico del proyecto
-  → Factura final
-  → Cobro final
-  → Cierre administrativo de la OS
+  → cuestionario de sondeo
+  → selección explícita de plantilla
+  → alcance funcional generado por el sistema
+  → revisión y firma del PL
+  → cotización multi-línea
+  → aceptación con evidencia
+  → Orden de Servicio
+  → anticipo y requisitos administrativos
+  → autorización de inicio
+  → proyecto creado con snapshot del alcance y PL
+  → PL incorpora al equipo
+  → plantilla crea el esqueleto inicial
+  → JSON Discovery descompone y enriquece el plan de ejecución
+  → ejecución por módulos
+  → pruebas y entrega para validación del cliente
+  → cierre técnico del proyecto
+  → OS entregada
+  → facturación y cobro conforme al plan comercial
+  → cierre administrativo de la OS
 ```
 
 ---
 
-## 2. Estados de la Oportunidad / Prospecto
+## 2. Autoridad de los artefactos del Proyecto
+
+| Artefacto | Propósito funcional | Puede modificar alcance vendido | Responsable de aprobación |
+|---|---|---:|---|
+| Cuestionario | Capturar necesidad y seleccionar el tipo de solución | No | Vendedor captura; PL revisa |
+| Alcance firmado | Fuente original de incluido, excluido, entregables, supuestos y criterios de aceptación | Es inmutable | PL firma |
+| Plantilla | Proporcionar módulos y elementos base reutilizables | No | PL confirma selección |
+| JSON Discovery | Descomponer y enriquecer el plan de ejecución derivado | No | PL revisa y aprueba importación |
+| Alcance efectivo | Alcance original más cambios autorizados | Sí, sólo mediante change request | Aprobadores aplicables |
+
+Reglas:
+
+- Reimportar la misma versión aprobada del JSON no crea duplicados.
+- Una importación nueva muestra altas, cambios y conflictos antes de aplicarse.
+- El JSON nunca cambia silenciosamente `included`, `excluded`, precio ni compromiso comercial.
+- Lo que exceda el alcance se registra como solicitud de cambio.
+
+---
+
+## 3. Oportunidad, alcance, cotización y OS
+
+### 3.1 Oportunidad
 
 `nuevo → contactado → calificado → discovery_requerimientos → cotizacion_enviada → negociacion → ganado | perdido | suspendido`
 
-- **Calificado (BR-N148):** requiere cuestionario completado.
-- **Ganado:** transición automática al aceptar cotización.
-- **Perdido:** requiere motivo.
-- **Cliente creado (BR-N168):** automático al calificar, si cumple condiciones.
+- `calificado` requiere cuestionario completado.
+- `ganado` ocurre al aceptar una cotización vigente.
+- `perdido` y `suspendido` requieren motivo.
+
+### 3.2 Alcance funcional firmado
+
+`draft → in_review → signed`
+
+- Lo genera el sistema desde cuestionario, catálogo y plantilla confirmada.
+- El PL puede ajustarlo durante `draft` o `in_review`.
+- `signed` es inmutable; cualquier variación posterior usa change request.
+- Este artefacto de negocio no es la SPEC técnica de INTEGRA.
+
+### 3.3 Cotización
+
+`draft → internal_review → sent → negotiation → accepted | rejected | expired | cancelled`
+
+- Es multi-línea.
+- `accepted` requiere identidad del aceptante, fecha, medio y evidencia.
+- La aceptación genera una sola OS de forma atómica.
+
+### 3.4 Orden de Servicio
+
+Flujo principal:
+
+`pending_deposit → pending_information → authorized_to_start → in_execution → delivered → closed`
+
+Estados laterales: `paused`, `cancelled`.
+
+| Transición | Actor | Precondición | Resultado |
+|---|---|---|---|
+| A `authorized_to_start` | Administrador | Anticipo cumplido o excepción del Director; OC y datos fiscales completos; PL asignado | Autoriza creación del proyecto |
+| A `in_execution` | Sistema | Proyecto creado correctamente | OS vinculada al proyecto |
+| A `delivered` | Sistema, por cierre del PL | Proyecto cerrado técnicamente | La OS queda entregada aunque exista saldo pendiente |
+| A `closed` | Administrador | Proyecto completado o cancelado; saldo total cero; factura final aplicable emitida | Cierre administrativo |
+| Excepción de cierre | Director | Motivo y evidencia | Permite cierre con saldo o gate excepcional; queda auditado |
+| A `paused` o `cancelled` | Actor con permiso | Motivo; en cancelación, decisión de reembolso | Conserva historial y detiene operación |
 
 ---
 
-## 3. Estados del Spec
+## 4. Creación y preparación del Proyecto
 
-`borrador → en_revision → firmado (inmutable)`
+### 4.1 Workflow de creación
 
-- Una vez firmado (BR-N52) no se puede modificar.
-- Cambios posteriores se registran como Solicitudes de Cambio de Alcance, no editan el spec.
+**Trigger:** OS pasa a `authorized_to_start`.
 
----
+**Precondiciones:**
 
-## 4. Estados de la Cotización
+- Alcance firmado.
+- Anticipo cumplido o excepción documentada.
+- OC validada cuando aplique.
+- PL asignado.
+- No existe otro proyecto para la OS.
 
-`borrador → revision_interna → enviada → negociacion → aceptada | rechazada | vencida | cancelada`
+**Resultado indivisible:**
 
-- **Aceptada:** transición a OS en workflow atómico. Inmutable (BR-N02).
-- **Rechazada:** registra motivo.
-- **Vencida:** transición automática cuando pasa la `valid_until`.
+1. Proyecto creado en `planning/pending`.
+2. Snapshot inmutable del alcance original y entregables base.
+3. PL incorporado como miembro líder.
+4. Esqueleto de la plantilla confirmada cargado.
+5. OS actualizada a `in_execution`.
+6. Evento registrado en bitácora.
 
----
+La creación no asigna programadores. El PL incorpora miembros después.
 
-## 5. Estados de la Orden de Servicio
+### 4.2 Handoff Sistema → PL
 
-`pendiente_anticipo → pendiente_informacion → autorizada_para_iniciar → en_ejecucion → entregada → cerrada` (laterales: `pausada`, `cancelada`)
+| Entrega | Criterio de aceptación del PL | Si falla |
+|---|---|---|
+| Proyecto, alcance original, plantilla, entregables base y bitácora | Coinciden con la OS y el alcance firmado | PL no inicia planeación y reporta inconsistencia administrativa |
 
-- **pendiente_información:** falta OC (BR-017) o datos fiscales.
-- **autorizada_para_iniciar:** precondiciones validadas (anticipo cobrado, OC validada si aplica, líder técnico).
-- **en_ejecucion:** proyecto creado, snapshot del scope copiado.
-- **entregada:** proyecto técnicamente cerrado, sin saldo pendiente.
-- **cerrada:** OS cerrada administrativamente; sin saldo vencido salvo autorización dirección.
+### 4.3 Incorporación del equipo
 
----
-
-## 6. Estados del Proyecto
-
-`planning → development → testing → client_validation → delivery` (situación: `pending | active | paused | completed | cancelled`; salud: `on_track | at_risk | delayed`)
-
-- **planning:** spec firmado, OS autorizada, descomposición inicial pendiente.
-- **development:** módulos en curso.
-- **testing:** módulos en `testing` o `deployed` con pruebas pendientes.
-- **client_validation:** entregables presentados al cliente (proxy PL).
-- **delivery:** entregables aceptados.
-
-### 6.1 Estados de un módulo de proyecto
-
-⚠️ **Vocabularios pendientes de unificación** (H-20260817-01). Propuesta ATLAS:
-`pending → in_progress → testing → deployed` (+ laterales `paused`, `blocked`, `cancelled`)
-
-- **pending:** creado desde plantilla, no iniciado.
-- **in_progress:** PL lo marca al iniciar (BR-N114: requiere `depends_on_modules` `deployed`).
-- **testing:** tareas completas, ejecutando tests.
-- **deployed:** BR-N113: 4 checks (reqs validados, actividades con evidencia, tests passing, entregables aceptados).
-- **paused / blocked / cancelled:** laterales.
-
-### 6.2 Reglas de avance
-
-- BR-N114: módulo `in_progress` requiere deps `deployed`.
-- BR-N113: módulo `deployed` requiere 4 checks.
+- El PL agrega primero a la persona como miembro del proyecto.
+- Después asigna módulos o tareas.
+- Una asignación concede la visibilidad necesaria sobre el proyecto.
+- Al retirar la asignación se revoca acceso operativo futuro sin borrar historial ni evidencia.
+- El técnico puede rechazar una tarea con motivo; vuelve a `ready` sin asignado y el PL recibe notificación.
 
 ---
 
-## 7. Estados de una Tarea
+## 5. Estados del Proyecto
 
-`backlog → ready → in_progress → blocked → in_review → done` (cancelable)
+El Proyecto mantiene tres dimensiones independientes:
 
-- **done** requiere checklist completo (BR-007) y, opcionalmente, tiempo registrado.
-- **blocked** requiere motivo (BR-006).
-- Asignación por PL; técnico puede autoasignarse del backlog sin asignar (táctica 34).
+- **Etapa:** `planning | development | testing | client_validation | delivery`.
+- **Situación:** `pending | active | paused | completed | cancelled`.
+- **Salud:** `on_track | at_risk | delayed`.
+
+### 5.1 Transiciones canónicas
+
+| Desde | Evento | Actor | Precondiciones | Hacia | Evidencia mínima |
+|---|---|---|---|---|---|
+| `planning/pending` | Iniciar planeación | PL | Proyecto creado y handoff aceptado | `planning/active` | Registro de inicio |
+| `planning/active` | Aprobar plan inicial | PL | Equipo mínimo y descomposición aprobada | Permanece hasta iniciar módulo | Versión de plan aprobada |
+| `planning/active` | Iniciar primer módulo | PL | Dependencias satisfechas | `development/active` | Módulo y responsable |
+| `development/active` | Terminar desarrollo requerido | PL | Módulos requeridos técnicamente listos | `testing/active` | Resumen de módulos y pruebas |
+| `testing/active` | Presentar entregables | PL | Pruebas bloqueantes técnicas aprobadas | `client_validation/active` | Entregables, fecha y contacto |
+| `client_validation/active` | Cerrar técnicamente | PL | Gates de cierre cumplidos | `delivery/completed` | Checklist de cierre y aceptaciones |
+| Cualquier situación operativa | Pausar | PL o Director | Motivo | Misma etapa / `paused` | Motivo y fecha |
+| `paused` | Reactivar | PL o Director | Causa resuelta | Etapa previa / `active` | Resolución registrada |
+| Cualquier situación no terminal | Cancelar | Director o actor autorizado | Motivo y decisión de reembolso | Misma etapa / `cancelled` | Aprobación y efecto comercial |
+
+La salud se calcula por fechas, avance y bloqueos. El PL puede sobreescribirla con motivo; se conservan el valor calculado y el manual.
 
 ---
 
-## 8. Estados de un Test
+## 6. Módulos
+
+Flujo principal: `pending → in_progress → testing → deployed`.
+
+Laterales: `paused`, `blocked`, `cancelled`.
+
+| Transición | Actor | Precondiciones |
+|---|---|---|
+| `pending → in_progress` | PL | Módulos requeridos en `deployed`; miembro responsable asignado |
+| `in_progress → testing` | PL o responsable | Tareas requeridas terminadas con evidencia |
+| `testing → deployed` | PL | Requerimientos validados internamente; tareas con evidencia; pruebas bloqueantes técnicas aprobadas; entregables preparados o presentados |
+| A `blocked` | PL o responsable | Motivo y dependencia afectada |
+| `blocked/paused → estado previo` | PL | Causa resuelta y registrada |
+| A `cancelled` | PL con autorización aplicable | Motivo; revisión de dependencias, alcance, fechas y entregables |
+
+`deployed` significa cierre técnico del módulo. La aceptación del cliente bloquea el cierre del Proyecto, no las dependencias normales entre módulos, salvo que una dependencia declare expresamente que requiere aceptación.
+
+---
+
+## 7. Requerimientos y tareas
+
+### 7.1 Requerimiento
+
+Flujo principal: `proposed → analysis → approved → development → testing → validated`.
+
+Laterales: `rejected`, `out_of_scope`.
+
+| Acción | Actor |
+|---|---|
+| Crear/proponer | Plantilla, JSON aprobado o PL |
+| Analizar y aprobar | PL |
+| Ejecutar | Técnico asignado |
+| Validar | PL o QA asignado |
+| Rechazar/fuera de alcance | PL, con motivo; fuera de alcance genera change request si se desea continuar |
+
+### 7.2 Tarea
+
+Flujo principal: `backlog → ready → in_progress → in_review → done`.
+
+Laterales: `blocked`, `cancelled`.
+
+| Evento | Resultado |
+|---|---|
+| Técnico rechaza asignación con motivo | `ready`, sin asignado, notificación al PL |
+| Tarea se bloquea | `blocked`, conserva estado operativo previo |
+| Se resuelve bloqueo | Regresa al estado operativo previo |
+| Revisión rechazada | `in_progress` con observaciones |
+| Revisión aprobada | `done` |
+
+`done` exige checklist completo y evidencia. El tiempo es opcional. Revisa el PL o QA asignado; si la misma persona tiene roles combinados, la bitácora identifica el rol usado.
+
+---
+
+## 8. Pruebas y entregables
+
+### 8.1 Pruebas
 
 `pending → passed | failed | blocked | not_applicable`
 
-- 7 tipos (functional, visual, ui, acceptance, performance, security, compatibility).
-- Sólo functional, visual, ui, acceptance y compatibility bloquean el cierre (H-20260817-08 — `acceptance` requiere trazabilidad del registrador).
-- failed requiere resultado + incidencia (BR-009).
+- Bloquean cierre: `functional`, `visual`, `ui`, `acceptance`, `compatibility`.
+- `performance` y `security` generan advertencia; permanecen visibles y pueden poner la salud `at_risk`.
+- `failed` exige resultado e incidencia.
+- `not_applicable` exige justificación y aprobación del PL.
+- Una prueba `acceptance` sólo puede omitirse con excepción documentada del Director.
+
+### 8.2 Entregables
+
+Flujo principal: `pending → preparing → delivered → accepted`.
+
+Corrección: `delivered → observed → corrected → delivered`.
+
+`rejected` es una salida explícita con motivo. Si el trabajo continúa, se crea una corrección o un change request según corresponda.
+
+### 8.3 Aceptación del cliente por proxy
+
+El PL registra, no acepta. Son obligatorios:
+
+- Nombre y organización de quien acepta.
+- Fecha y medio de contacto.
+- Evidencia, como correo, PDF, minuta o mensaje verificable.
+- Entregable, versión y respuesta asociada.
+
+Sin estos datos, el entregable no puede quedar `accepted`.
 
 ---
 
-## 9. Estados de un Entregable
+## 9. Cambios de alcance
 
-`pending → preparing → delivered → observed → corrected → accepted | rejected`
+Flujo:
 
-- `accepted` requiere nombre del aceptante + fecha (BR-010).
-- Comentarios del cliente en cada estado.
+`requested → analysis → quoted (si aplica) → authorized | rejected | cancelled → in_progress → implemented → validated`
 
----
-
-## 10. Estados de un Cambio de Alcance (Change Request)
-
-`solicitado → analisis → cotizado → autorizado | rechazado → implementado | cancelado`
-
-- Sin `authorized` no se implementa (BR-011).
-- Si requiere cobro adicional: nueva cotización vinculada antes de autorizar.
-- Actualiza `scope_version` y bitácora sin alterar el scope firmado.
+- El PL analiza impacto técnico, horas, costo y fecha.
+- Si hay impacto comercial, se genera cotización vinculada y se registra aceptación del cliente.
+- Si no hay costo, se puede omitir `quoted`, pero nunca `authorized`.
+- La autorización interna corresponde al actor con permiso `aprobar_cambios`; la aceptación comercial del cliente conserva evidencia.
+- Al autorizar, se incrementa la versión del alcance efectivo y se actualiza el plan de ejecución sin alterar el alcance original.
+- Al validar, se actualizan módulos, tareas, pruebas, entregables, fechas y dependencias afectadas.
 
 ---
 
-## 11. Estados de una Factura
+## 10. Cierre técnico y administrativo
 
-`draft → issued → partially_paid → paid` (laterales: `overdue`, `cancelled`)
+### 10.1 Gates de cierre técnico del Proyecto
 
-- `overdue`: emitida con `due_date` vencida y saldo > 0.
-- `cancelled`: con motivo SAT (01-04), reversa aplicaciones (BR-123).
-- Pago vía `payment_allocations`; la suma de aplicaciones no supera el cobro ni el saldo de la factura.
+El PL sólo puede cerrar técnicamente cuando:
 
----
+1. No existen tareas críticas abiertas.
+2. Los requerimientos obligatorios están validados.
+3. Las pruebas bloqueantes están aprobadas o tienen excepción del Director.
+4. Los entregables obligatorios están aceptados o tienen excepción del Director.
+5. Las solicitudes de cambio autorizadas están implementadas y validadas, o formalmente canceladas.
+6. La bitácora contiene evidencias y excepciones.
 
-## 12. Estados de un Cobro (Payment)
+Resultado: Proyecto `delivery/completed`; OS `delivered`.
 
-`registered → confirmed → reversed`
+### 10.2 Facturación y cierre administrativo de OS
 
-- `registered`: cobro capturado.
-- `confirmed`: financial_transaction de ingreso creada, factura recalculada.
-- `reversed`: corrige errores vía `reversed_payment_id`.
-
----
-
-## 13. Estados de una Comisión
-
-`estimada → devengada → liberada → pagada` (lateral: `cancelled`)
-
-- **estimada:** al aceptar cotización con rate > 0.
-- **liberada (BR-N33 v2):** `estimada × Σ(facturas NO canceladas) / total_OS`.
-- **pagada:** Director/admin la transfiere explícitamente.
-- BR-N123: si la factura se cancela, la comisión proporcional se reversa.
+- La entrega técnica no depende del pago.
+- La facturación sigue el plan vendido: pago único, mensualidades o suscripción.
+- Cualquier factura final aplicable se emite antes del cierre administrativo.
+- El Administrador cierra la OS cuando el proyecto está completado o cancelado y el saldo total pendiente es cero.
+- Sólo el Director puede aprobar una excepción de saldo, con motivo, evidencia y auditoría.
 
 ---
 
-## 14. Estados de un Movimiento Financiero
+## 11. Handoffs completos
 
-`draft → confirmed → reconciled` (laterales: `cancelled`, `reversed`)
-
-- reconciled no se edita (BR-013).
-- Reverso siempre con motivo y auditoría (BR-014).
-
----
-
-## 15. Handoffs clave (resumen)
-
-| # | Handoff | De → A | Momento |
-|---|---|---|---|
-| 1 | Vendedor → Director | V → D | Cotización con descuento > 10% requiere aprobación |
-| 2 | Cliente → Vendedor | Cliente → V | Aceptación verbal/correo (registrada con evidencia) |
-| 3 | Vendedor → Administrador | V → A | OS creada → cobro de anticipo |
-| 4 | Administrador → Sistema | A → S | Autorización → workflow atómico project_creation |
-| 5 | PL → Sistema | PL → S | Inicio de discovery → JSON-v0 |
-| 6 | Programador → PL | Prog → PL | Cada task done / módulo `deployed` |
-| 7 | PL → Cliente (proxy) | PL → C | Entregables para validación |
-| 8 | Cliente (proxy) → PL | C → PL | Aceptación / observaciones (trazabilidad de registrador) |
-| 9 | PL → Administrador | PL → A | Cierre técnico → factura final |
-| 10 | Administrador → Director | A → D | Cierre administrativo + pago de comisiones |
+| # | Origen → destino | Paquete entregado | Aceptación | Rechazo o devolución |
+|---|---|---|---|---|
+| 1 | Vendedor → PL | Cuestionario, necesidad, plantilla propuesta | PL confirma plantilla y alcance | Devuelve preguntas faltantes |
+| 2 | PL → Vendedor | Alcance firmado | Listo para cotizar | Corrige antes de firmar |
+| 3 | Vendedor → Administrador | Cotización aceptada y evidencia; OS | Cobro y requisitos administrativos | Solicita evidencia o datos |
+| 4 | Administrador → Sistema | OS autorizada | Proyecto creado de forma indivisible | OS permanece sin iniciar |
+| 5 | Sistema → PL | Proyecto, snapshot, plantilla y bitácora | PL inicia planeación | Reporta inconsistencia |
+| 6 | PL → Programador/Diseñador/QA | Membresía, módulo/tarea, prioridad, criterio y fechas | Técnico acepta o comienza | Rechaza tarea con motivo |
+| 7 | Programador/Diseñador → PL/QA | Trabajo, checklist y evidencia | Pasa revisión | Vuelve a `in_progress` con observaciones |
+| 8 | PL → QA | Versión, alcance de prueba y criterios | QA ejecuta y registra | Bloquea por datos o entorno faltante |
+| 9 | QA → PL | Resultado, incidencias y evidencia | PL avanza o corrige | Regresa a desarrollo |
+| 10 | PL → Cliente | Entregable y criterio de aceptación | Cliente acepta u observa | Corrección o change request |
+| 11 | Cliente → PL proxy | Respuesta y evidencia | PL registra identidad y medio | Sin evidencia no hay aceptación |
+| 12 | PL → Administrador | Cierre técnico y gates | OS queda entregada; factura final si aplica | Devuelve si faltan evidencias |
+| 13 | Administrador → Director | Solicitud de excepción o cierre | Director aprueba/rechaza; Admin ejecuta cierre | OS permanece entregada |
 
 ---
 
-## 16. Workflow atómico: creación de proyecto
+## 12. Reglas financieras relacionadas
 
-**Trigger:** OS pasa a `autorizada_para_iniciar`.
-**Precondiciones:**
-- Spec firmado.
-- Anticipo cumplido (o autorización de dirección).
-- Líder técnico asignado.
-- No existe proyecto para la OS.
+- La comisión se libera sobre facturado, no sobre cobrado.
+- Cancelar una factura reversa la porción correspondiente de comisión.
+- Un cobro no sustituye la emisión de una factura.
+- El cierre administrativo usa saldo total pendiente, no sólo saldo vencido.
 
-**Acciones atómicas:**
-1. Crear `project` con snapshot inmutable del scope.
-2. Copiar entregables base.
-3. Agregar al PL como `project_member` con `project_role=lider`.
-4. Cargar plantilla seleccionada si existe.
-5. Actualizar OS a `en_ejecucion`.
-6. Crear entrada de bitácora.
+---
 
-⚠️ **Hallazgo:** este workflow no asigna programadores. Pendiente definir (H-20260817-10).
+## 13. Cobertura funcional del flujo
+
+El flujo vigente se valida en `discovery/simulations/SIMULACION-FLUJO-PROYECTOS-20260817.md` con:
+
+- Happy path completo.
+- Tarea rechazada y reasignada.
+- Bloqueo recuperable.
+- Prueba bloqueante fallida.
+- Entregable observado y corregido.
+- Cambio de alcance con y sin costo.
+- Cierre técnico con saldo pendiente.
+- Cierre administrativo y excepción del Director.
+- Cancelación y revisión de reembolso.

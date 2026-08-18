@@ -1,135 +1,86 @@
-# INDEX · Vector IA — Discovery
+# INDEX · Vector IA — Discovery funcional
 
-**Versión:** 2026-08-17 (actualizado 22:51)
-**Estado del discovery:** `ready_for_integra` — consolidación funcional hecha, 6 contradicciones P0 resueltas, 205 reglas de negocio confirmadas (reconstrucción cerrada DEC-FUN-52), 52 decisiones confirmadas, 5 preguntas NB no bloqueantes sin cerrar, 5 OOS operativos fuera de scope. ATLAS puede emitir `FUNCTIONAL-HANDOFF` a INTEGRA.
+**Versión:** 2026-08-17 23:20
+**Estado:** `ready_for_integra`
+**Fuente funcional única:** `discovery/FUNCTIONAL-BASELINE.md` v1.0
 
----
-
-## 1. Fuente funcional vigente
-
-**Único documento funcional canónico:** `discovery/FUNCTIONAL-BASELINE.md`
-Versión: v0 (post-reorganización 2026-08-17).
-Status: consolidado; **NO** es especificación técnica.
+El discovery funcional está consolidado, sin contradicciones P0 ni preguntas bloqueantes. El flujo de Proyectos fue cerrado y simulado antes del handoff.
 
 ---
 
-## 2. Estructura del discovery
+## 1. Documentos vigentes
 
-| Archivo | Propósito | Vigente |
+| Archivo | Propósito | Estado |
 |---|---|---|
-| `discovery/INDEX.md` | Este archivo | ✅ |
-| `discovery/FUNCTIONAL-BASELINE.md` | Fuente funcional canónica | ✅ |
-| `discovery/ESTADO-FUNCIONAL.md` | Cierre por área (cerrado / pendiente / bloqueante) | ✅ |
-| `discovery/HALLAZGOS.md` | Hallazgos con severidad (P0–P3) y evidencia | ✅ |
-| `discovery/DECISIONES-FUNCIONALES.md` | Decisiones confirmadas con trazabilidad | ✅ |
-| `discovery/REGLAS-DE-NEGOCIO.md` | Reglas con ID y cálculos | ✅ |
-| `discovery/ACTORES-Y-PERMISOS.md` | Roles, permisos, visibilidad, acciones | ✅ |
-| `discovery/FLUJOS-FUNCIONALES.md` | Estados, transiciones, handoffs | ✅ |
-| `discovery/PREGUNTAS-ABIERTAS.md` | Preguntas para Frank (P0 blocking + NB) | ✅ |
-| `discovery/SIMULACIONES.md` | Índice de simulaciones y su estado de revisión | ✅ |
-| `discovery/OPEN-QUESTIONS.md` | Preguntas operativas fuera del scope de discovery | ✅ |
+| `FUNCTIONAL-BASELINE.md` | Fuente funcional canónica | READY |
+| `HANDOFF-FUNCIONAL-A-INTEGRA.md` | Contrato de entrega funcional | READY |
+| `ESTADO-FUNCIONAL.md` | Definition of Ready y estado por área | READY |
+| `DECISIONES-FUNCIONALES.md` | 60 decisiones confirmadas | READY |
+| `REGLAS-DE-NEGOCIO.md` | 231 reglas confirmadas con ID único | READY |
+| `ACTORES-Y-PERMISOS.md` | Roles, visibilidad y acciones críticas | READY |
+| `FLUJOS-FUNCIONALES.md` | Estados, transiciones y handoffs | READY |
+| `HALLAZGOS.md` | Contradicciones históricas y resolución | READY |
+| `PREGUNTAS-ABIERTAS.md` | Cero bloqueantes; Q-NB-3 diferida | READY |
+| `SIMULACIONES.md` | Índice y estado de simulaciones | READY |
+| `OPEN-QUESTIONS.md` | Control de contaminación operativa | READY |
 
 ---
 
-## 3. Material histórico (archivado, NO vigente)
+## 2. Material histórico o de evidencia
 
-| Ruta | Origen | Estado |
+| Ruta | Estado | Uso permitido |
 |---|---|---|
-| `discovery/sessions/DISCOVERY-20260814-01.md` | Sesión 14-ago (diseño inicial) | histórico |
-| `discovery/sessions/DISCOVERY-20260814-02.md` | Sesión 14-ago (cierre diagrama) | histórico |
-| `discovery/simulations/SIMULACION-FLUJO-COMPLETO-20260817.md` | Simulación interactiva 17-ago | AUDITADA_CON_HALLAZGOS |
-| `discovery/archive/sistema-vectoria-discovery.mmd.bak` | Respaldo de diagrama mermaid | histórico |
-| `discovery/archive/borradores-mixtos/vectoria_especificacion_sistema_administrativo_mvp.json` | Especificación funcional JSON, 13-ago, **SUPERSEDED** — NO UTILIZAR PARA IMPLEMENTACIÓN | superseded |
-| `discovery/assets/mermaid-diagram.png` | Render del diagrama (movido a assets/) | vigente como recurso gráfico |
+| `sessions/DISCOVERY-20260814-01.md` | Histórico | Trazabilidad |
+| `sessions/DISCOVERY-20260814-02.md` | Histórico | Trazabilidad |
+| `simulations/SIMULACION-FLUJO-COMPLETO-20260817.md` | `AUDITADA_CON_HALLAZGOS` | Evidencia histórica, no contrato |
+| `simulations/SIMULACION-FLUJO-PROYECTOS-20260817.md` | `VALIDADA_FUNCIONALMENTE` | Cobertura vigente de Proyectos |
+| `REGLAS-V1-20260815-reconstruccion.md` | Cuaderno cerrado | Origen de reconstrucción |
+| `archive/borradores-mixtos/*.json` | `SUPERSEDED` | No usar para implementar |
+| `archive/*.bak` | Histórico | Respaldo |
+| `assets/mermaid-diagram.png` | Recurso gráfico | Referencia visual |
 
 ---
 
-## 4. Bloqueadores para handoff a INTEGRA
+## 3. Cierre funcional de Proyectos
 
-| # | Bloqueador | Severidad | Estado al 2026-08-17 22:51 |
-|---|---|---|---|
-| 1 | Vocabulario único de estados de módulo | P0 | ✅ Resuelto (DEC-FUN-20260817-47) |
-| 2 | Cotización multi-línea vs 1 línea | P0 | ✅ Resuelto (DEC-FUN-20260817-48) |
-| 3 | Base de la comisión (facturado vs cobrado) | P0 | ✅ Resuelto (DEC-FUN-20260817-49) |
-| 4 | Timbrado CFDI (real vs externo) | P0 | ✅ Resuelto (DEC-FUN-20260817-50) |
-| 5 | Conteos (decisiones / reglas / módulos) | P0 | ✅ Resuelto (DEC-FUN-20260817-51) |
-| 6 | Archivo `DECISIONES-V1-20260815.md` no localizado | P0 | ✅ Reconstrucción cerrada (DEC-FUN-20260817-52) — 205 reglas confirmed |
+Decisiones DEC-FUN-20260817-53 a DEC-FUN-20260817-60:
 
-**Las 6 contradicciones P0 están RESUELTAS y la reconstrucción de las 150+ reglas está CERRADA.** ATLAS puede emitir `FUNCTIONAL-HANDOFF` a INTEGRA.
+1. Selección explícita de plantilla.
+2. Autoridad entre alcance, plantilla y JSON Discovery.
+3. Aceptación del cliente registrada por proxy con evidencia.
+4. Incorporación y asignación de programadores por el PL.
+5. Cierre técnico y administrativo separados.
+6. Transiciones canónicas del Proyecto.
+7. `deployed` como cierre técnico del módulo.
+8. Flujos de revisión, pruebas, entregables y cambios de alcance.
 
----
-
-## 5. Preguntas no bloqueantes (diferibles)
-
-Ver `PREGUNTAS-ABIERTAS.md` sección NB:
-- Q-NB-1: mapeo catálogo → plantilla.
-- Q-NB-2: aceptación del cliente vía proxy PL.
-- Q-NB-3: regla de desviación presupuestal.
-- Q-NB-4: asignación de programadores.
-- Q-NB-5: cierre técnico vs cierre administrativo.
+La simulación vigente cubre happy path, bloqueos, rechazos, pruebas fallidas, correcciones, cambios, saldo pendiente, excepción y cancelación.
 
 ---
 
-## 6. Estado de simulaciones
+## 4. Gate de handoff
 
-- `SIM-20260817-01` (SaaS de Facturación Interna): **AUDITADA_CON_HALLAZGOS** — no validada. Se rehará contra spec consolidada.
-
----
-
-## 7. Verificación de límites
-
-| Límite | Cumplido |
+| Criterio | Estado |
 |---|---|
-| SPEC técnica creada | ❌ No (out of scope ATLAS) |
-| Arquitectura creada | ❌ No (out of scope) |
-| Código implementado | ❌ No (out of scope) |
-| Commit / push | ❌ Pendiente OK de Frank |
-| Stack tecnológico | ❌ No decidido |
-| Tablas / endpoints / schemas | ❌ No creados |
-| ADR | ❌ No creado |
+| Una fuente funcional vigente | ✅ |
+| Alcance incluido/excluido | ✅ |
+| Actores y permisos | ✅ |
+| Decisiones y reglas con ID | ✅ |
+| Flujos y escenarios | ✅ |
+| Handoffs con aceptación/rechazo | ✅ |
+| Preguntas funcionales bloqueantes | 0 |
+| Contradicciones P0 vigentes | 0 |
+| SPEC técnica creada por ATLAS | No, correctamente |
+| Arquitectura o código creados por ATLAS | No, correctamente |
 
 ---
 
-## 8. Handoff
+## 5. Pendiente diferido
 
-- **Estado actual:** `ready_for_integra` — consolidación funcional hecha, 6 contradicciones P0 resueltas, 205 reglas confirmed (DEC-FUN-52 cerrada), 52 decisiones confirmadas.
-- **Próximo paso:** ATLAS emite `FUNCTIONAL-HANDOFF` a INTEGRA con:
-  - 52 decisiones (DECISIONES-FUNCIONALES.md)
-  - 205 reglas firmes + 2 proposed amarradas a Q-NB-1 y Q-NB-2 (REGLAS-DE-NEGOCIO.md)
-  - Flujos y actores completos (FLUJOS-FUNCIONALES.md + ACTORES-Y-PERMISOS.md)
-  - 5 preguntas NB sin cerrar (no bloqueantes) para que INTEGRA las eleve si las necesita
-  - Aviso de la simulación AUDITADA_CON_HALLAZGOS (se rehará cuando se programe)
-- **Las 2 proposed (BR-N230 y BR-N287) y 3 reglas sin ID** se resuelven cuando Frank cierre Q-NB-1 a Q-NB-5.
+Q-NB-3: política de desviación contra presupuesto declarado. Sólo afecta una automatización futura de Comercial. Si INTEGRA la necesita, emite `DISCOVERY-GAP`; no debe inferirla.
 
 ---
 
-## 9. Cambios respecto al estado anterior
+## 6. Próximo propietario
 
-### Cambio 1 (c9ab8e3 → b615379): reorganización inicial
-| Antes (c9ab8e3) | Ahora |
-|---|---|
-| `PROYECTO.md` único | `FUNCTIONAL-BASELINE.md` canónico + 10 documentos funcionales especializados |
-| `vectoria_especificacion_..._mvp.json` marcado `ready_for_build` | JSON movido a `archive/borradores-mixtos/` con tag **SUPERSEDED** |
-| `DISCOVERY-20260814-*.md` en raíz | Movidos a `sessions/` |
-| `SIMULACION-...md` en raíz | Movida a `simulations/` con estado AUDITADA_CON_HALLAZGOS |
-| `sistema-vectoria-discovery.mmd.bak` en raíz | Movido a `archive/` |
-| `mermaid-diagram.png` en raíz | Movido a `assets/` |
-| Sin rastreo de contradicciones | `HALLAZGOS.md` con 15 hallazgos (severidad, evidencia, propuesta) |
-| Sin preguntas estructuradas | `PREGUNTAS-ABIERTAS.md` con 6 P0 y 5 NB |
-| Reglas dispersas | `REGLAS-DE-NEGOCIO.md` con tabla consolidada y cálculos |
-
-### Cambio 2 (b615379 → pendiente): cierre de las 6 P0
-- `DECISIONES-FUNCIONALES.md`: append de DEC-FUN-20260817-47 a -52 (las 6 decisiones nuevas).
-- `REGLAS-DE-NEGOCIO.md`: aviso de vocabulario único + nota sobre 150+ reglas con plan.
-- `HALLAZGOS.md`: 5 contradicciones P0/P1 marcadas `resolved` con la decisión que las cierra; H-06 marcada `confirmed (con plan)`.
-- `ESTADO-FUNCIONAL.md`: estado pasa a `conditionally_ready` para handoff a INTEGRA.
-- `INDEX.md`: tabla de bloqueadores actualizada, handoff a `conditionally_ready`.
-
----
-
-## 10. Para Frank
-
-- Las 6 contradicciones P0 están resueltas; la reconstrucción de las 150+ reglas está cerrada (205 confirmed).
-- El discovery está `ready_for_integra`.
-- ATLAS puede emitir `FUNCTIONAL-HANDOFF` a INTEGRA en cuanto lo indiques.
-- Las 5 preguntas NB (Q-NB-1 a Q-NB-5) no bloquean el handoff; se elevan a INTEGRA para que las resuelva durante la fase técnica o con Frank si lo necesita.
+INTEGRA puede comenzar las especificaciones técnicas usando `HANDOFF-FUNCIONAL-A-INTEGRA.md`. Debe preservar los IDs DEC/BR/FLOW/SCN y devolver cualquier decisión nueva de producto a ATLAS/Frank.

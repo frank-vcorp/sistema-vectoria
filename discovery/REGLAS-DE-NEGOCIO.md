@@ -1,9 +1,9 @@
 # REGLAS-DE-NEGOCIO · Vector IA
 
-**Versión:** 2026-08-17 (reconstrucción cerrada 22:51)
+**Versión:** 2026-08-17 (cierre funcional de Proyectos 23:20)
 **Convención:** `BR-###` (regla original estable) y `BR-N###` (regla ratificada en sesiones posteriores). Mismas IDs del repositorio, sin renumerar.
 
-> **Reconstrucción de las 150+ reglas (DEC-FUN-20260817-52) — CERRADA:** ATLAS reconstruyó las reglas a partir de las fuentes consolidadas, las verificó como funcionales (no técnicas) y Frank confirmó el lote el 2026-08-17 22:51. **Resultado:** 207 reglas totales = **205 confirmed** + 2 proposed. Este documento consolida las 205 reglas firmes. Las 2 proposed viven al final del documento, amarradas a Q-NB-1 y Q-NB-2.
+> **Reconstrucción y cierre — CERRADOS:** ATLAS reconstruyó el lote inicial y Frank lo confirmó el 2026-08-17 22:51. El cierre funcional posterior incorporó DEC-FUN-53 a DEC-FUN-60. **Resultado vigente y reproducible:** 231 reglas confirmadas con ID único y ninguna regla propuesta. La única política diferida es Q-NB-3, fuera del gate inicial de Proyectos.
 
 > **Vocabulario de estados de módulo (DEC-FUN-20260817-47):** vocabulario único vigente — `pending → in_progress → testing → deployed` (+ laterales `paused`, `blocked`, `cancelled`). Salud: `on_track / at_risk / delayed`. BR-N113 y BR-N114 usan este vocabulario.
 
@@ -80,6 +80,7 @@
 | BR-N227 | Cada servicio del catálogo tiene un tipo (servicio único, servicio recurrente, producto único, producto recurrente) y un ciclo de facturación (único, mensual, anual, a convenir). |
 | BR-N228 | Existen 9 plantillas base de proyecto (4 niveles de sistema web + 5 de otros tipos). |
 | BR-N229 | Cada plantilla subdivide el proyecto en módulos con requerimientos, tareas, pruebas, entregables y dependencias entre módulos. |
+| BR-N230 | El cuestionario exige seleccionar explícitamente la plantilla aplicable; el PL la confirma antes de firmar el alcance. El sistema puede advertir inconsistencias, pero no cambia la selección silenciosamente. (DEC-FUN-53.) |
 
 ---
 
@@ -128,8 +129,11 @@
 | BR-N246 | Al autorizar la orden, el sistema crea el proyecto en workflow atómico. |
 | BR-N247 | La orden pasa a "en ejecución" cuando se crea el proyecto. |
 | BR-N248 | La orden pasa a "entregada" cuando el proyecto cierra técnicamente. |
-| BR-N249 | La orden pasa a "cerrada" administrativamente cuando el proyecto está terminado o cancelado y no hay saldo vencido, salvo autorización de dirección. |
+| BR-N249 | La orden pasa a "cerrada" administrativamente cuando el proyecto está terminado o cancelado y su saldo total pendiente es cero, salvo excepción documentada aprobada por el Director. (DEC-FUN-57.) |
 | BR-N250 | La orden puede pausarse y cancelarse con motivo. |
+| BR-N392 | El cierre técnico del proyecto coloca la orden en `entregada` aunque exista saldo pendiente; la entrega no equivale a cierre administrativo. (DEC-FUN-57.) |
+| BR-N393 | Toda factura final aplicable debe emitirse antes del cierre administrativo de la orden y conforme al plan de facturación vendido. (DEC-FUN-57.) |
+| BR-N394 | Una excepción financiera de cierre sólo puede aprobarla el Director con motivo, evidencia y registro de auditoría. (DEC-FUN-57.) |
 
 ---
 
@@ -139,13 +143,22 @@
 |---|---|
 | BR-N251 | El proyecto nace desde la orden con copia inmutable del alcance y los entregables base. |
 | BR-N252 | El proyecto se subdivide en módulos; el avance se controla módulo por módulo. |
-| BR-N253 | El proyecto tiene tres dimensiones de estado: etapa (planificación, desarrollo, pruebas, validación del cliente, entrega), situación (pendiente, activo, pausado, completado, cancelado) y salud (en tiempo, en riesgo, retrasado). |
+| BR-N253 | El proyecto tiene tres dimensiones independientes: etapa (`planning`, `development`, `testing`, `client_validation`, `delivery`), situación (`pending`, `active`, `paused`, `completed`, `cancelled`) y salud (`on_track`, `at_risk`, `delayed`). |
 | BR-N254 | El PL puede sobreescribir la salud del proyecto sólo con motivo; se conservan la calculada y la manual. |
 | BR-N255 | El proyecto no puede cerrarse si hay actividades críticas abiertas, salvo excepción documentada. |
 | BR-N256 | El proyecto no puede cerrarse si entregables obligatorios no están aceptados, salvo excepción aprobada. |
 | BR-N257 | El proyecto no puede cerrarse si pruebas críticas no están aprobadas, salvo excepción aprobada. |
 | BR-N258 | El cierre técnico del proyecto es distinto del cierre administrativo de la orden. |
 | BR-N259 | El proyecto lleva bitácora con tipos: reunión, decisión, bloqueo, solicitud, cambio, entrega, aprobación, reprogramación, nota, sistema. |
+| BR-N375 | El proyecto nace `planning/pending`; el PL lo pasa a `planning/active` al iniciar la planeación y descomposición. (DEC-FUN-58.) |
+| BR-N376 | El inicio del primer módulo coloca el proyecto en `development/active`; al terminar el desarrollo requerido pasa a `testing/active`. (DEC-FUN-58.) |
+| BR-N377 | Cuando los entregables están presentados y sólo falta respuesta del cliente, el proyecto pasa a `client_validation/active`. (DEC-FUN-58.) |
+| BR-N378 | El cierre técnico coloca el proyecto en `delivery/completed` y registra actor, fecha, gates y excepciones aplicadas. (DEC-FUN-58.) |
+| BR-N379 | Pausar, reactivar o cancelar un proyecto exige motivo; cancelar exige además la decisión de reembolso aplicable y conserva el historial. |
+| BR-N380 | El alcance firmado es la verdad funcional original; el alcance efectivo sólo cambia mediante una solicitud de cambio autorizada. (DEC-FUN-54.) |
+| BR-N381 | La plantilla es un esqueleto inicial y el JSON Discovery es un plan de ejecución derivado; ninguno puede alterar silenciosamente el alcance firmado. (DEC-FUN-54.) |
+| BR-N382 | El PL agrega miembros después de crear el proyecto; nadie puede recibir un módulo o tarea sin pertenecer antes al proyecto. (DEC-FUN-56.) |
+| BR-N383 | La asignación a proyecto, módulo o tarea concede la visibilidad necesaria; retirar la asignación revoca el acceso operativo futuro, pero conserva evidencia e historial. (DEC-FUN-56.) |
 
 ---
 
@@ -153,12 +166,14 @@
 
 | ID | Regla |
 |---|---|
-| BR-N113 | Un módulo pasa a "deployed" sólo si: requerimientos validados, actividades con evidencia, pruebas aprobadas y entregables aceptados. (DEC-FUN-47.) |
+| BR-N113 | Un módulo pasa a `deployed` sólo si: requerimientos validados internamente, tareas terminadas con evidencia, pruebas bloqueantes técnicas aprobadas y entregables preparados o presentados. La aceptación del cliente se exige para cerrar el proyecto, no para desbloquear dependencias, salvo dependencia explícita. (DEC-FUN-47 y DEC-FUN-59.) |
 | BR-N114 | Un módulo pasa a "in_progress" sólo si sus módulos dependientes están "deployed". (DEC-FUN-47.) |
 | BR-N260 | Estados del módulo: `pending → in_progress → testing → deployed` (+ `paused`, `blocked`, `cancelled`). (DEC-FUN-47.) |
 | BR-N261 | Salud del módulo: `on_track` / `at_risk` / `delayed`. (DEC-FUN-47.) |
 | BR-N262 | El PL marca el módulo "in_progress" al iniciar y "deployed" al cerrar. |
 | BR-N263 | El módulo puede pausarse con motivo y cancelarse con motivo. |
+| BR-N384 | `paused` y `blocked` son estados laterales recuperables; al resolver la causa el módulo vuelve a su último estado operativo válido. |
+| BR-N385 | Cancelar un módulo obliga al PL a revisar dependencias, alcance efectivo, fechas y entregables antes de continuar el proyecto. |
 
 ---
 
@@ -168,9 +183,10 @@
 |---|---|
 | BR-005 | Un requerimiento no pasa a desarrollo sin descripción y criterio de aceptación. |
 | BR-N264 | Cada requerimiento tiene un folio único dentro del proyecto. |
-| BR-N265 | Estados del requerimiento: propuesto → análisis → aprobado → desarrollo → pruebas → validado → rechazado / fuera de alcance. |
+| BR-N265 | Flujo del requerimiento: `proposed → analysis → approved → development → testing → validated`; `rejected` y `out_of_scope` son salidas laterales con motivo. |
 | BR-N266 | Un requerimiento rechazado o fuera de alcance requiere motivo. |
 | BR-N267 | El requerimiento puede tener responsable asignado. |
+| BR-N386 | El PL aprueba un requerimiento antes de desarrollo; PL o QA asignado lo validan después de las pruebas correspondientes. |
 
 ---
 
@@ -180,13 +196,15 @@
 |---|---|
 | BR-006 | Una tarea bloqueada requiere motivo. |
 | BR-007 | Una tarea "done" requiere checklist completo. |
-| BR-N268 | Estados de la tarea: backlog → ready → in_progress → blocked → in_review → done (cancelable). |
+| BR-N268 | Flujo principal de tarea: `backlog → ready → in_progress → in_review → done`; `blocked` y `cancelled` son estados laterales. |
 | BR-N269 | Sólo el PL asigna tareas; el técnico puede autoasignarse del backlog sin asignar. |
-| BR-N270 | Un técnico puede rechazar una tarea asignada con motivo obligatorio. |
-| BR-N271 | Una tarea "done" admite evidencia (link, archivo o nota). |
+| BR-N270 | Un técnico puede rechazar una tarea asignada con motivo obligatorio; la tarea vuelve a `ready` sin asignado y notifica al PL. |
+| BR-N271 | Una tarea `done` requiere evidencia (link, archivo o nota) además del checklist completo. |
 | BR-N272 | Una tarea puede tener participantes además del asignado. |
 | BR-N273 | Una tarea puede tener dependencias simples con otras tareas. |
 | BR-N274 | Una tarea puede vincularse a un requerimiento. |
+| BR-N387 | Una tarea bloqueada conserva el estado operativo previo y vuelve a él al resolver el bloqueo; una revisión rechazada vuelve a `in_progress` con observaciones. |
+| BR-N388 | PL o QA asignado aprueban la revisión de la tarea. Si una persona combina roles, el registro identifica con qué rol realizó la revisión. |
 
 ---
 
@@ -215,7 +233,9 @@
 | BR-N284 | Las pruebas funcional, visual, UI, aceptación y compatibilidad bloquean el cierre del proyecto. |
 | BR-N285 | Las pruebas de performance y seguridad sólo generan advertencia. |
 | BR-N286 | La prueba de aceptación la ejecuta el Cliente (vía proxy PL) y bloquea el cierre. |
-| BR-N287 | Cuando el PL registra una aceptación en nombre del cliente, actúa como **registrador** y debe quedar evidencia, fecha y nombre de quien acepta. (PROPOSED — pendiente Q-NB-2.) |
+| BR-N287 | Cuando el PL registra una aceptación en nombre del cliente, actúa sólo como **registrador**; son obligatorios nombre y organización del aceptante, fecha, medio de contacto y evidencia. El PL no puede figurar simultáneamente como aceptante. (DEC-FUN-55.) |
+| BR-N389 | Marcar una prueba como `not_applicable` requiere justificación y aprobación del PL; una prueba de aceptación no puede omitirse sin excepción aprobada por el Director. |
+| BR-N390 | Las advertencias de performance o seguridad no bloquean por sí solas el cierre, pero deben quedar visibles en la bitácora y pueden colocar la salud en `at_risk`. |
 
 ---
 
@@ -224,10 +244,11 @@
 | ID | Regla |
 |---|---|
 | BR-010 | Un entregable "accepted" requiere nombre de quien acepta y fecha. |
-| BR-N288 | Estados del entregable: pendiente → preparando → entregado → observado → corregido → aceptado / rechazado. |
+| BR-N288 | Flujo del entregable: `pending → preparing → delivered → accepted`; si queda `observed`, pasa a `corrected` y vuelve a `delivered` para nueva validación. `rejected` es una salida explícita con motivo. |
 | BR-N289 | El entregable lleva fecha comprometida y fecha real de entrega. |
 | BR-N290 | El entregable puede llevar versión y comentarios del cliente. |
 | BR-N291 | Un entregable rechazado puede ser corregido y re-entregado. |
+| BR-N391 | La aceptación válida de un entregable cumple BR-N287 y se registra separadamente de quien capturó la respuesta. |
 
 ---
 
@@ -241,6 +262,7 @@
 | BR-N294 | Si el cambio requiere cobro adicional, se genera cotización vinculada antes de autorizar. |
 | BR-N295 | El cambio de alcance evalúa impacto técnico, horas adicionales, costo adicional y nueva fecha. |
 | BR-N296 | El cambio autorizado actualiza la versión del alcance y la bitácora sin alterar el alcance original. |
+| BR-N395 | Flujo del cambio: `requested → analysis → quoted` cuando hay impacto comercial → `authorized | rejected | cancelled`; si se autoriza, continúa `in_progress → implemented → validated`. Sin costo puede omitir `quoted`, nunca `authorized`. (DEC-FUN-60.) |
 
 ---
 
@@ -370,6 +392,9 @@
 | BR-N354 | Cualquier desviación del alcance se agrega como solicitud de cambio; no se modifica el alcance original. |
 | BR-N355 | El Director (Atlas) revisa y mejora el JSON; el Programador trabaja tareas específicas; el PL revisa y aprueba al final. |
 | BR-N356 | El Vendedor con doble rol PL puede participar en discovery; el Vendedor puro NO. |
+| BR-N396 | Toda importación de JSON muestra al PL las altas, cambios y posibles conflictos antes de aplicarlos. |
+| BR-N397 | Reimportar la misma versión aprobada del JSON no duplica módulos, requerimientos, tareas, pruebas ni entregables. |
+| BR-N398 | Cada importación conserva versión, actor, fecha y resultado; sólo la aprobación del PL actualiza el plan de ejecución vigente. |
 
 ---
 
@@ -406,24 +431,9 @@
 
 ---
 
-## Reglas proposed (pendientes de Q-NB-1 y Q-NB-2)
+## Regla diferida no bloqueante
 
-Estas dos reglas están verificadas como funcionales pero dependen de preguntas no bloqueantes sin cerrar:
-
-| ID | Regla | Amarrada a |
-|---|---|---|
-| BR-N230 | El mapeo del catálogo "Sistema Web" a una plantilla específica (sitio / web app / saas) se hace por selección explícita en el cuestionario. | Q-NB-1 (mapeo catálogo → plantilla) |
-| BR-N287 | Cuando el PL registra una aceptación en nombre del cliente, actúa como **registrador** y debe quedar evidencia, fecha y nombre de quien acepta. | Q-NB-2 (aceptación del cliente vía proxy PL) |
-
----
-
-## Reglas sin ID estable (captura futura)
-
-Las siguientes reglas no se incorporaron al cuaderno porque están amarradas a huecos funcionales aún no resueltos. Se numerarán cuando Frank cierre la pregunta NB correspondiente:
-
-- `R-desviacion-presupuestal` — alerta o bloqueo cuando la cotización excede el presupuesto declarado en el cuestionario (Q-NB-3 / H-20260817-09).
-- `R-asignacion-programador` — quién y cuándo asigna programadores a un módulo/proyecto (Q-NB-4 / H-20260817-10).
-- `R-cierre-tecnico-vs-administrativo` — separar el cierre técnico del proyecto del cierre administrativo de la OS (Q-NB-5 / H-20260817-14).
+- La política de advertencia o bloqueo cuando la cotización exceda el presupuesto declarado permanece diferida como `Q-NB-3`. No afecta la definición técnica inicial de Proyectos; Comercial deberá declararla como gap si su SPEC necesita automatizar esa comparación.
 
 ---
 
@@ -431,9 +441,9 @@ Las siguientes reglas no se incorporaron al cuaderno porque están amarradas a h
 
 | Métrica | Valor |
 |---|---|
-| Reglas confirmed (este archivo) | 205 |
-| Reglas proposed (este archivo) | 2 |
-| Reglas sin ID (captura futura) | 3 |
-| **Total** | **210** |
+| Reglas confirmadas con ID único | 231 |
+| Reglas propuestas | 0 |
+| Política funcional diferida | 1 (`Q-NB-3`) |
+| **Total con ID** | **231** |
 
 > **Nota:** la simulación del 17-ago arrastró cálculos incorrectos (mezcló costo-hora cotizado con snapshot interno; re-aplicó el % de comisión al liberarla). Estos son hallazgos P2 — ver HALLAZGOS H-20260817-11. Las reglas formales de cálculo son las de la sección B26.

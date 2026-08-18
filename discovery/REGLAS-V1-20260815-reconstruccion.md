@@ -1,5 +1,7 @@
 # REGLAS-V1-20260815-reconstruccion · Cuaderno de trabajo
 
+> **Estado:** `CLOSED_HISTORICAL_INPUT`. Este archivo conserva el lote tal como fue reconstruido a las 22:51. No es el registro vigente ni debe usarse para handoff. La fuente canónica es `REGLAS-DE-NEGOCIO.md`, actualizada después del cierre funcional de Proyectos.
+
 **Fecha:** 2026-08-17 (sesión de reconstrucción, DEC-FUN-20260817-52)
 **Objetivo:** reconstruir las 150+ reglas referenciadas en versiones previas a partir de las fuentes consolidadas del discovery.
 **Convención de IDs:** los IDs existentes (BR-001 a BR-016 y BR-N01 a BR-N168) se conservan. Las nuevas reglas derivadas usan IDs `BR-N200` en adelante.
@@ -423,6 +425,6 @@
 
 Tras verificación ATLAS, se reformularon todas las reglas que mencionaban tablas físicas, campos de BD o mecanismos técnicos a lenguaje de negocio observable. Las menciones residuales (folio, UUID fiscal, XML del CFDI) se conservan porque son términos de negocio reconocidos por el usuario.
 
-## Próximo paso
+## Cierre posterior del cuaderno
 
-Las 205 reglas confirmed están consolidadas en `REGLAS-DE-NEGOCIO.md`. Las 2 proposed (BR-N230 y BR-N287) se confirman cuando Frank cierre Q-NB-1 y Q-NB-2. ATLAS puede emitir `FUNCTIONAL-HANDOFF` a INTEGRA con las 205 reglas firmes.
+BR-N230 y BR-N287 fueron confirmadas por DEC-FUN-53 y DEC-FUN-55. El cierre de Proyectos agregó reglas posteriores; `REGLAS-DE-NEGOCIO.md` contiene el conjunto vigente de 231 reglas confirmadas con ID único. Este cuaderno permanece sin reescritura interna para conservar la trazabilidad del lote original.

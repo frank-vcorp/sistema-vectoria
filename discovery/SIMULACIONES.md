@@ -1,30 +1,44 @@
 # SIMULACIONES · Vector IA
 
-**Versión:** 2026-08-17
+**Versión:** 2026-08-17 23:20
 
 ---
 
-## SIM-20260817-01 · SaaS de Facturación Interna (Estudio García Contadores)
+## SIM-20260817-01 · SaaS de Facturación Interna
 
 **Ruta:** `discovery/simulations/SIMULACION-FLUJO-COMPLETO-20260817.md`
-**Fecha:** 2026-08-17
-**Caso:** Estudio García Contadores, 3 contadores, ~30 clientes, sistema de facturación sin SAT.
-**Estado:** **AUDITADA_CON_HALLAZGOS** — no validada.
+**Estado:** `AUDITADA_CON_HALLAZGOS`
+**Uso:** evidencia histórica; no usar como contrato vigente.
 
-### Resumen de la simulación
-- Prospecto → Cuestionario (4 capas) → Spec generado por el sistema → Spec firmado por PL → Cotización multi-línea → Aceptación con evidencia → OS creada → Anticipo cobrado → OS autorizada → Proyecto creado → 3 módulos (auth, clientes, facturación) → ejecución → entregables.
+Hallazgos principales:
 
-### Hallazgos de la auditoría (ver HALLAZGOS H-20260817-11)
+- Mezcló precio cotizado con costo interno.
+- Reaplicó el porcentaje de comisión.
+- Omitió factura y cobro finales.
+- Colapsó cierre técnico y administrativo.
+- No acreditó aceptación final ni asignación del equipo.
 
-- Cálculo 127h × $250/h = $190,500 incorrecto (mezcla costo cotizado con snapshot interno).
-- Comisión re-aplica el 8% al liberarla.
-- Falta factura de anticipo, factura final, cobro final.
-- Falta aceptación final de entregables, cierre técnico y cierre administrativo.
-- La OS aparece cerrada sin mostrar quién la cerró ni bajo qué condiciones.
-- Mezcla facturado/cobrado al liberar la comisión.
-- Presupuesto $80k → cotización $209,931 sin renegociación.
-- Vendedor selecciona su propia comisión del 8% sin definir quién la aprueba.
+Los errores se conservan sin modificar para mantener trazabilidad.
 
-### Decisión
+---
 
-La simulación queda **AUDITADA_CON_HALLAZGOS**. No se modifica su contenido. Se rehará contra una fuente funcional consolidada cuando se resuelvan las contradicciones P0 (PREGUNTAS-ABIERTAS).
+## SIM-20260817-02 · Flujo funcional de Proyectos
+
+**Ruta:** `discovery/simulations/SIMULACION-FLUJO-PROYECTOS-20260817.md`
+**Estado:** `VALIDADA_FUNCIONALMENTE`
+**Fuente:** FUNCTIONAL-BASELINE v1.0 y DEC-FUN-53 a DEC-FUN-60.
+
+Cobertura:
+
+- Happy path desde cuestionario hasta cierre administrativo.
+- Autoridad entre alcance, plantilla y JSON.
+- Incorporación del equipo.
+- Rechazo, bloqueo y revisión de tareas.
+- Pruebas bloqueantes y advertencias.
+- Aceptación del cliente con evidencia.
+- Entregable observado y corregido.
+- Cambios con y sin costo.
+- Cierre técnico con saldo pendiente.
+- Excepción del Director y cancelación.
+
+**Resultado:** todos los escenarios tienen actor, precondición, evidencia, transición y salida. El flujo de Proyectos queda funcionalmente listo para INTEGRA.

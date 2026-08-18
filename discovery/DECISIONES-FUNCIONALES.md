@@ -33,7 +33,8 @@
 
 ## DEC-FUN-20260814-06 · Cotización multi-línea
 - **Decisión:** cotización con múltiples líneas, items auto-pre-llenados desde spec + catálogo.
-- **Estado:** confirmed en 24-ago (decisión #6). ⚠️ **Contradice** la restricción inicial "Cotización 1 línea" (DISCOVERY-01 §Restricción Crítica 1). Frank debe ratificar. Ver H-20260817-02.
+- **Estado:** confirmed (Frank, 2026-08-17; decisión consolidada en DEC-FUN-20260817-48).
+- **Reemplaza a:** la restricción inicial "Cotización 1 línea" de DISCOVERY-01.
 
 ## DEC-FUN-20260814-07 · OS con campos de OC opcionales
 - **Decisión:** OS puede llevar 4 campos opcionales para Orden de Compra del cliente.
@@ -49,11 +50,12 @@
 
 ## DEC-FUN-20260814-10 · Timbrado CFDI real con FacturoPorTi
 - **Decisión:** el sistema timbra CFDI 4.0 directamente vía API. CSD y API key encriptados en BD.
-- **Estado:** confirmed (decisión #10) — **contradice** JSON archive que dice "no implementar conexión directa con SAT" en MVP. Frank debe ratificar. Ver H-20260817-04.
+- **Estado:** confirmed (Frank, 2026-08-17; decisión consolidada en DEC-FUN-20260817-50).
+- **Reemplaza a:** el alcance sin timbrado directo del JSON archivado.
 
 ## DEC-FUN-20260814-11 · Módulo Cobranza separado del Comercial
 - **Decisión:** cobranza es módulo propio, no sub-módulo de Comercial.
-- **Estado:** confirmed (decisión #11). ⚠️ Algunos documentos lo listan como sub-módulo. Frank debe ratificar visibilidad.
+- **Estado:** confirmed (decisión #11).
 
 ## DEC-FUN-20260814-12 · Plantillas con 4 niveles para Sistema Web
 - **Decisión:** landing, sitio, web app y saas son 4 plantillas distintas.
@@ -65,7 +67,7 @@
 
 ## DEC-FUN-20260814-14 · Estructura modular en plantillas (project_modules)
 - **Decisión:** cada plantilla subdivide un proyecto en módulos con `requirements/tasks/tests/deliverables` propios y `depends_on_modules[]`.
-- **Estado:** confirmed (decisión #14). ⚠️ Vocabulario de estados a unificar (ver H-20260817-01).
+- **Estado:** confirmed (decisión #14; vocabulario unificado en DEC-FUN-20260817-47).
 
 ## DEC-FUN-20260814-15 · JSON Discovery al FINAL (no round-trip continuo)
 - **Decisión:** el JSON Discovery se usa para descomponer el proyecto una vez que el spec está firmado, no durante todo el ciclo.
@@ -206,7 +208,7 @@
 - **Decisión:** opción 1.
 - **Razón:** coherente con BR-N113/114 ya escritos, conciso, fácil de programar y probar, alineado con vocabulario estándar de proyectos técnicos.
 - **Estado:** confirmed (Frank, 2026-08-17).
-- **Implicación:** INTEGRA recibe un enum único de 7 valores para `status` y 3 para `health`. Las reglas BR-N113/114 mantienen su semántica; sólo se confirma el nombre canónico de los estados. La simulación del 17-ago se rehará contra este vocabulario.
+- **Implicación:** INTEGRA recibe un vocabulario único de 7 estados y 3 valores de salud. DEC-FUN-59 aclara después la semántica de `deployed`. El vocabulario fue cubierto por SIM-20260817-02.
 - **Reemplaza a:** vocabulario `pending / en_curso / en_pruebas / implementado / pospuesto` de FUNCTIONAL-BASELINE §18.
 
 ## DEC-FUN-20260817-48 · Cotización multi-línea confirmada (Q-P0-2)
@@ -216,7 +218,7 @@
   2. 1 línea, monto global (restaurar la restricción original de DISCOVERY-01).
   3. Híbrido configurable (Director define por cotización).
 - **Decisión:** opción 1.
-- **Razón:** consistente con la decisión ratificada 24-ago, con el JSON archive (que conserva `quote_items`) y con la simulación del 17-ago (que asume multi-línea).
+- **Razón:** consistente con la decisión ratificada el 17-ago, con el JSON archive (que conserva `quote_items`) y con la simulación del 17-ago (que asume multi-línea).
 - **Estado:** confirmed (Frank, 2026-08-17).
 - **Implicación:** el módulo Comercial implementa `quote_items` polimórficos (`service | license | expense | discount`) con cálculo por línea y totales agregados. Catálogo de servicios alimenta líneas automáticamente.
 - **Reemplaza a:** la restricción "Cotización 1 línea, monto global" de DISCOVERY-20260814-01 §Restricción Crítica 1.
@@ -230,7 +232,7 @@
 - **Decisión:** opción 1.
 - **Razón:** BR-N33 v2 ratificada 17-ago como parte de las decisiones tácticas/estructurales. La regla vigente confirmada. Coherente con BR-N123 (reversa al cancelar factura) y con el flujo de ingresos.
 - **Estado:** confirmed (Frank, 2026-08-17).
-- **Implicación:** la comisión se libera al facturar (no al cobrar). El JSON archive queda `superseded` para la regla de comisión. La simulación del 17-ago se rehará; el PASO 9.1 tenía el error de mezclar ambas bases.
+- **Implicación:** la comisión se libera al facturar (no al cobrar). El JSON archive queda `superseded` para la regla de comisión. SIM-20260817-01 conserva el error histórico y SIM-20260817-02 usa la secuencia corregida.
 - **Reemplaza a:** fórmula sobre cobrado del `vectoria_especificacion_..._mvp.json` archive.
 
 ## DEC-FUN-20260817-50 · Timbrado CFDI real con FacturoPorTi confirmado (Q-P0-4)
@@ -254,7 +256,7 @@
 - **Decisión:** opción 1.
 - **Razón:** los conteos ATLAS son los más recientes y trazables a sesiones específicas; se alinean con la decisión de reconstruir las 150+ reglas (Q-P0-6 opción 2).
 - **Estado:** confirmed (Frank, 2026-08-17).
-- **Implicación:** las cifras 52 / 7+1+1 / 31 son el lineamiento vigente. La cifra 150+ deja de ser referencia firme hasta que se reconstruya (siguiente sesión de discovery). Cabeceras de otros documentos que digan lo contrario se actualizan al consolidar.
+- **Implicación al momento de la decisión:** las cifras 52 / 7+1+1 / 31 cerraron la contradicción inicial. Después se completó la reconstrucción y se agregaron DEC-FUN-53 a -60; el conteo vigente es 60 decisiones y 231 reglas confirmadas.
 - **Reemplaza a:** las cifras oscilantes 34/40/46/52 (decisiones), 6/7/8/9 (módulos) que aparecían en distintos documentos.
 
 ## DEC-FUN-20260817-52 · Reconstruir las 150+ reglas con ATLAS (Q-P0-6)
@@ -266,13 +268,60 @@
 - **Decisión:** opción 2.
 - **Razón:** no hay copia de respaldo localizada del archivo; las 150+ reglas se pueden reconstruir a partir de las sesiones 14-ago y 17-ago con un proceso dirigido (una regla a la vez). Mantiene la trazabilidad y consistencia con el resto del discovery.
 - **Estado:** confirmed (Frank, 2026-08-17).
-- **Implicación:** se programa una sesión dedicada de discovery (no en este pase). ATLAS generará `discovery/REGLAS-V1-20260815-reconstruccion.md` o un archivo similar, una regla a la vez, validada por Frank. Mientras tanto, las 31 reglas con ID confirmado son el **único conjunto de reglas firme** para handoff a INTEGRA.
+- **Implicación:** ATLAS generó `discovery/REGLAS-V1-20260815-reconstruccion.md`; Frank confirmó el lote reconstruido el 2026-08-17. El conjunto consolidado vigente se publica en `discovery/REGLAS-DE-NEGOCIO.md`.
 - **Reemplaza a:** la referencia firme a `DECISIONES-V1-20260815.md` como contenedor de las 150+ reglas.
+
+---
+
+## DEC-FUN-20260817-53 · Selección explícita de plantilla desde el cuestionario
+- **Pregunta:** ¿cómo se elige la plantilla correcta cuando el catálogo agrupa varios niveles de Sistema Web?
+- **Decisión:** el cuestionario solicita explícitamente el tipo de solución (`web_landing`, `web_sitio`, `web_app` o `web_saas`). El sistema puede advertir inconsistencias con otras respuestas, pero el PL confirma la plantilla antes de firmar el alcance.
+- **Estado:** confirmed (Frank, 2026-08-17; autorización de aplicar el cierre funcional recomendado).
+- **Reemplaza a:** selección ad-hoc o inferencia silenciosa de la plantilla.
+
+## DEC-FUN-20260817-54 · Autoridad entre alcance, plantilla y JSON Discovery
+- **Pregunta:** ¿qué artefacto manda cuando el alcance firmado, la plantilla y el JSON contienen módulos, tareas, pruebas o entregables?
+- **Decisión:** el alcance firmado es la verdad funcional de lo vendido; la plantilla aporta un esqueleto inicial reutilizable; el JSON Discovery descompone y enriquece el plan de ejecución derivado. El JSON nunca modifica silenciosamente el alcance firmado. Un cambio fuera de alcance sólo entra mediante una solicitud de cambio autorizada.
+- **Controles funcionales:** toda importación de JSON requiere revisión del PL, conserva versión y no duplica elementos al reimportar la misma versión. Los cambios propuestos se presentan como diferencias antes de aprobarse.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Reemplaza a:** el solapamiento sin autoridad descrito en H-20260817-12.
+
+## DEC-FUN-20260817-55 · Aceptación del cliente registrada por proxy
+- **Pregunta:** ¿cómo opera la aceptación del cliente sin portal de cliente en el MVP?
+- **Decisión:** el PL puede registrar la respuesta como proxy, pero nunca figura como aceptante. Debe capturar nombre de la persona que acepta, organización, fecha, medio de contacto y evidencia. Sin esos datos no existe aceptación válida.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Reemplaza a:** una aceptación registrada por el PL sin identidad ni evidencia del cliente.
+
+## DEC-FUN-20260817-56 · Asignación de programadores posterior a la creación del proyecto
+- **Pregunta:** ¿quién incorpora y asigna programadores al proyecto?
+- **Decisión:** el workflow de creación agrega únicamente al PL. Después, el PL agrega miembros al proyecto y les asigna módulos o tareas. La pertenencia al proyecto precede a cualquier asignación y controla la visibilidad. El técnico conserva el derecho a rechazar una tarea con motivo.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Reemplaza a:** asignaciones implícitas o acceso por una tarea sin membresía de proyecto.
+
+## DEC-FUN-20260817-57 · Cierre técnico, entrega y cierre administrativo separados
+- **Pregunta:** ¿cómo se relacionan la terminación técnica del proyecto, la entrega, la facturación y el cierre de la OS?
+- **Decisión:** el PL realiza el cierre técnico cuando se cumplen los gates funcionales; esto completa el proyecto y coloca la OS en `entregada`, aunque exista saldo pendiente. El Administrador cierra la OS después, cuando el saldo total es cero; sólo el Director puede aprobar una excepción documentada. La facturación sigue el plan comercial de la OS y cualquier factura final debe emitirse antes del cierre administrativo.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Reemplaza a:** exigir saldo cero para entregar o permitir cierre administrativo sólo por ausencia de saldo vencido.
+
+## DEC-FUN-20260817-58 · Transiciones canónicas del Proyecto
+- **Decisión:** la etapa describe dónde está el trabajo; la situación indica si puede operar; la salud expresa riesgo. El proyecto nace `planning/pending`, pasa a `planning/active` cuando el PL inicia la planeación, a `development/active` al iniciar el primer módulo, a `testing/active` cuando termina el desarrollo requerido, a `client_validation/active` al presentar entregables y a `delivery/completed` con el cierre técnico. `paused` y `cancelled` son situaciones laterales con motivo y auditoría.
+- **Estado:** confirmed (Frank, 2026-08-17).
+
+## DEC-FUN-20260817-59 · `deployed` es cierre técnico del módulo
+- **Pregunta:** ¿un módulo debe esperar la aceptación final del cliente para desbloquear sus dependientes?
+- **Decisión:** no. `deployed` significa que el módulo quedó técnicamente listo: requerimientos validados internamente, tareas terminadas con evidencia, pruebas bloqueantes técnicas aprobadas y entregables preparados o presentados. La aceptación del cliente bloquea el cierre técnico del proyecto, no el inicio normal de módulos dependientes, salvo que una dependencia declare expresamente que requiere aceptación del cliente.
+- **Estado:** confirmed (Frank, 2026-08-17).
+- **Reemplaza parcialmente a:** BR-N113 en cuanto exigía aceptación final para todo módulo.
+
+## DEC-FUN-20260817-60 · Ciclo de trabajo, revisión y cambios de alcance
+- **Decisión:** `blocked` es un estado lateral recuperable de tarea; una revisión rechazada devuelve la tarea a `in_progress`; `done` exige checklist y evidencia. PL o QA asignado revisan. Los requerimientos los aprueba el PL y los valida PL/QA. Las pruebas no aplicables requieren justificación del PL. Un entregable observado/corregido vuelve a `delivered` hasta ser aceptado. Un cambio de alcance sigue análisis, aprobación aplicable, implementación y validación; los cambios sin costo omiten cotización, pero nunca autorización.
+- **Estado:** confirmed (Frank, 2026-08-17).
 
 ---
 
 ## Resumen de decisiones (al 2026-08-17)
 
-- **52 decisiones** ratificadas en discovery (las 46 originales + 6 nuevas DEC-FUN-20260817-47 a -52, resultado de la consolidación).
-- 6 decisiones de consolidación (Q-P0-1 a Q-P0-6) resueltas con recomendación ATLAS confirmada.
-- Estado del discovery: `ready_for_integra` (sujeto a la reconstrucción posterior de las 150+ reglas con ATLAS).
+- **60 decisiones** ratificadas en discovery (52 previas + 8 decisiones de cierre funcional DEC-FUN-20260817-53 a -60).
+- Las decisiones 53-60 cierran los huecos de Proyectos detectados en la auditoría del 17-ago.
+- Estado del discovery: `ready_for_integra` sin preguntas funcionales bloqueantes.

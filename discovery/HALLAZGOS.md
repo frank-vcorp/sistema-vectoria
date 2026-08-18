@@ -1,7 +1,9 @@
 # HALLAZGOS · Vector IA
 
-**Versión:** 2026-08-17
+**Versión:** 2026-08-17 23:20
 **Severidad:** P0 (bloqueante) · P1 (importante) · P2 (menor) · P3 (cosmético)
+
+> Las referencias de línea describen snapshots previos al cierre y se conservan como evidencia histórica. El estado y la resolución de cada hallazgo son la información vigente.
 
 ---
 
@@ -30,7 +32,7 @@
 **Evidencia:**
 - `sessions/DISCOVERY-20260814-01.md` L128: "Cotización 1 línea, monto global — sin catálogo de servicios, sin multi-línea, sin desglose de horas".
 - `FUNCTIONAL-BASELINE.md` L531: "Cotización (multi-línea). Items auto-pre-llenados desde el spec + catálogo".
-- `FUNCTIONAL-BASELINE.md` L974 (decisión 6 del 24-ago): "Cotización multi-línea (sin 'modo 1 línea')".
+- Baseline previo al cierre (decisión 6 del 17-ago): "Cotización multi-línea (sin 'modo 1 línea')".
 - `archive/borradores-mixtos/vectoria_especificacion_sistema_administrativo_mvp.json` (reglas comerciales): `quote_items` con multi-línea.
 
 **Impacto:**
@@ -55,7 +57,7 @@
 - Diferencias en escenarios de prueba de QA.
 - La simulación del flujo ya arrastró el conflicto.
 
-**Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — comisión sobre FACTURADO (BR-N33 v2). Decisión registrada como **DEC-FUN-20260817-49** en `DECISIONES-FUNCIONALES.md`. La fórmula del JSON archive queda `superseded`. La simulación del 17-ago se rehará con la fórmula correcta.
+**Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — comisión sobre FACTURADO (BR-N33 v2). Decisión registrada como **DEC-FUN-20260817-49**. La simulación original conserva el error y la simulación vigente usa la secuencia corregida.
 
 ---
 
@@ -65,7 +67,7 @@
 **Severidad:** P1
 **Evidencia:**
 - `archive/borradores-mixtos/vectoria_especificacion_sistema_administrativo_mvp.json` (scope): "no implementar conexión directa con SAT, bancos, WhatsApp, correo o firma electrónica certificada" en el MVP.
-- `FUNCTIONAL-BASELINE.md` L622 + decisión estructural #10 (24-ago): "Cambio mayor vs propuesta inicial: el sistema **timbrará** CFDI directamente vía API (FacturoPorTi)".
+- Baseline previo al cierre + decisión estructural #10 (17-ago): el sistema timbra CFDI mediante FacturoPorTi.
 - Mismo JSON archive (future_backlog): "timbrado para el futuro" — el propio JSON se contradice.
 
 **Impacto:**
@@ -92,35 +94,30 @@
 - INTEGRA no puede confiar en el baseline si los conteos no se reproducen.
 - Métricas de readiness quedan opacas.
 
-**Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — conteos ATLAS: 52 decisiones (23+23+6) · 7 módulos visibles + Hoy + Administración/Plantillas/Catálogo · 31 reglas con ID localizable (150+ pendientes de reconstruir). Decisión registrada como **DEC-FUN-20260817-51** en `DECISIONES-FUNCIONALES.md`.
+**Resolución:** DEC-FUN-51 cerró el conteo inicial; la reconstrucción y el cierre posterior dejaron el conteo vigente en 60 decisiones y 231 reglas confirmadas. Los números anteriores permanecen sólo como evidencia histórica.
 
 ---
 
 ## H-20260817-06 · Archivo `DECISIONES-V1-20260815.md` no localizado (P0)
 
-**Estado:** confirmed (con plan)
+**Estado:** resolved
 **Severidad:** P0
 **Evidencia:**
 - `FUNCTIONAL-BASELINE.md` L772: "(150+ reglas totales documentadas en `DECISIONES-V1-20260815.md`)".
-- `find discovery -iname "DECISIONES*"` no devuelve resultados.
+- El archivo específico `DECISIONES-V1-20260815.md` no existe; no debe confundirse con `DECISIONES-FUNCIONALES.md`.
 
 **Impacto:**
 - Las 150+ reglas referenciadas **no existen en el repositorio**.
 - FUNCTIONAL-BASELINE.md §12 sólo lista 31 reglas con ID trazable.
 - INTEGRA no tiene un registro canónico de reglas para el contrato.
 
-**Resolución (2026-08-17 22:00):** Frank aprobó **opción 2** — reconstruir las 150+ reglas con ATLAS en sesión dedicada de discovery dirigida. Decisión registrada como **DEC-FUN-20260817-52** en `DECISIONES-FUNCIONALES.md`. Plan:
-1. Sesión posterior (no en este pase) abre `discovery/REGLAS-V1-20260815-reconstruccion.md` como cuaderno de trabajo.
-2. ATLAS propone reglas una a una, Frank confirma o corrige.
-3. Al cerrar, las reglas con nuevo ID se incorporan a `REGLAS-DE-NEGOCIO.md` y al contrato de handoff.
-
-**Mientras tanto:** las **31 reglas con ID confirmado** son el único conjunto firme para handoff a INTEGRA. Esto NO bloquea el handoff si INTEGRA acepta trabajar contra ese subconjunto y ampliarlo cuando se complete la reconstrucción.
+**Resolución:** DEC-FUN-52 ordenó reconstruirlas; el cuaderno `REGLAS-V1-20260815-reconstruccion.md` se completó, Frank confirmó el lote y `REGLAS-DE-NEGOCIO.md` quedó como registro canónico. El cierre funcional posterior deja 231 reglas confirmadas con ID único.
 
 ---
 
 ## H-20260817-07 · Mapeo catálogo → plantilla no definido (P1)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P1
 **Evidencia:**
 - `FUNCTIONAL-BASELINE.md` L278: catálogo "Sistema Web" agrupa "Página Web estática + e-commerce + Landing + CMS".
@@ -131,13 +128,13 @@
 - Ya produjo un error en la simulación (la plantilla "Sitio Web" generó 3 módulos, pero la simulación luego calculó costos por horas detalladas como si fuera una SaaS).
 - Sin mapeo explícito, el cuestionario no puede auto-seleccionar la plantilla correcta.
 
-**Acción:** PF-5 en `ESTADO-FUNCIONAL.md`. No bloqueante discovery.
+**Resolución:** DEC-FUN-53 exige selección explícita en el cuestionario y confirmación del PL antes de firmar el alcance. BR-N230.
 
 ---
 
 ## H-20260817-08 · Aceptación del cliente vía proxy PL (P1)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P1
 **Evidencia:**
 - `FUNCTIONAL-BASELINE.md` L20 (decisión estructural #14 — tests) y L873 (tipo `acceptance`): "Cliente (proxy PL)".
@@ -148,13 +145,13 @@
 - El PL podría registrar por sí mismo la aceptación que necesita para cerrar el proyecto — conflicto de interés funcional.
 - No hay trazabilidad de que el PL actúa como **registrador**, no como quien acepta.
 
-**Acción:** Frank define cómo se exige contacto, evidencia, fecha y registrador. PF-7 en `ESTADO-FUNCIONAL.md`.
+**Resolución:** DEC-FUN-55 define al PL como registrador, nunca como aceptante, con identidad, organización, fecha, medio y evidencia obligatorios. BR-N287.
 
 ---
 
 ## H-20260817-09 · Falta regla de desviación presupuestal (P1)
 
-**Estado:** candidate
+**Estado:** deferred_non_blocking
 **Severidad:** P1
 **Evidencia:**
 - `FUNCTIONAL-BASELINE.md` §8.1: la cotización lleva descuento, total, etc., pero no se compara contra el presupuesto declarado en el cuestionario.
@@ -164,13 +161,13 @@
 - El sistema no advierte ni bloquea cuando la cotización excede ampliamente el presupuesto del prospecto.
 - Decisión comercial se toma sin soporte funcional.
 
-**Acción:** PF-6 en `ESTADO-FUNCIONAL.md`. No bloqueante discovery.
+**Acción:** se conserva como Q-NB-3 para la futura SPEC de Comercial. No bloquea Proyectos; INTEGRA debe emitir `DISCOVERY-GAP` si necesita automatizarla.
 
 ---
 
 ## H-20260817-10 · Programador sin handoff explícito (P1)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P1
 **Evidencia:**
 - `FUNCTIONAL-BASELINE.md` §8.3: "Líder técnico asignado" al crear el proyecto.
@@ -181,13 +178,13 @@
 - El programador queda fuera del flujo atómico de creación de proyecto.
 - Se depende de la asignación manual posterior del PL.
 
-**Acción:** No bloqueante discovery. PF-1 en flujo de creación de proyecto.
+**Resolución:** DEC-FUN-56 establece que el PL incorpora miembros después de crear el proyecto y antes de asignar módulos o tareas. La membresía controla visibilidad. BR-N382/383.
 
 ---
 
 ## H-20260817-11 · Simulación arrastra errores de cálculo y omisiones (P2)
 
-**Estado:** candidate
+**Estado:** historical_issue_resolved_in_new_simulation
 **Severidad:** P2
 **Evidencia (en `simulations/SIMULACION-FLUJO-COMPLETO-20260817.md`):**
 
@@ -207,13 +204,13 @@
 - La simulación no puede declararse validada.
 - Estados finales incompatibles con pendientes.
 
-**Acción:** No se corrige la simulación. Estado **AUDITADA_CON_HALLAZGOS** en `SIMULACIONES.md`. Queda para rehacer contra spec v1.3.
+**Acción:** la simulación original se conserva como evidencia histórica en estado **AUDITADA_CON_HALLAZGOS**. El flujo corregido se reejecuta en `simulations/SIMULACION-FLUJO-PROYECTOS-20260817.md`.
 
 ---
 
 ## H-20260817-12 · Spec, plantilla y JSON Discovery se pisan entre sí (P1)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P1
 **Evidencia:**
 - `FUNCTIONAL-BASELINE.md` L491-493: el spec se genera automáticamente desde cuestionario + catálogo + plantilla (incluye requirements, tasks, tests, deliverables).
@@ -223,7 +220,7 @@
 - No está definido qué crea cada etapa.
 - El alcance firmado (spec) podría ser alterado por la descomposición.
 
-**Acción:** No bloqueante discovery. PF-1 en flujo de proyecto.
+**Resolución:** DEC-FUN-54 fija la autoridad: alcance firmado = verdad original; plantilla = esqueleto; JSON = plan derivado versionado; sólo un change request autorizado cambia el alcance efectivo. BR-N380/381 y BR-N396/398.
 
 ---
 
@@ -238,7 +235,7 @@
 
 ## H-20260817-14 · Cerrar técnico y cierre administrativo de OS sin diferenciar (P1)
 
-**Estado:** candidate
+**Estado:** resolved
 **Severidad:** P1
 **Evidencia:**
 - `FUNCTIONAL-BASELINE.md` §8.3: autorización de inicio actualiza OS a `en_ejecucion`.
@@ -249,14 +246,14 @@
 - El cierre técnico del proyecto y el cierre administrativo de la OS quedan mezclados.
 - La simulación omite ambos.
 
-**Acción:** No bloqueante discovery. PF-1 en flujo de cierre.
+**Resolución:** DEC-FUN-57 separa ambos cierres. El cierre técnico completa el proyecto y entrega la OS aunque haya saldo; el cierre administrativo exige saldo total cero o excepción documentada del Director. BR-N249 y BR-N392/394.
 
 ---
 
 ## H-20260817-15 · Pendientes operativos fuera del alcance de discovery (P3)
 
-**Estado:** deferred (out_of_consolidation_scope)
+**Estado:** removed_as_context_contamination
 **Severidad:** P3
 **Evidencia:** ChatGPT Sol listó 5 pendientes operativos (88+ entries sin commitear, 3 buckets Storage no creados, 30k CCTs SEP no cargados, Frank no ha probado la URL visualmente, T-E2E-07 RLS no ejecutado). Pertenecen a la capa de implementación/infra, no a discovery funcional.
 
-**Acción:** Archivados en `OPEN-QUESTIONS.md` con tag `out_of_consolidation_scope`. Se retoman cuando exista INTEGRA/infra.
+**Acción:** se retiraron de `OPEN-QUESTIONS.md` y del handoff porque corresponden a otro sistema. Su historial permanece recuperable en Git.
