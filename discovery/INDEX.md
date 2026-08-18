@@ -1,7 +1,7 @@
 # INDEX · Vector IA — Discovery
 
-**Versión:** 2026-08-17 (actualizado 22:00)
-**Estado del discovery:** cerrado a nivel de descubrimiento. **`conditionally_ready` para handoff a INTEGRA** — las 6 contradicciones P0 están resueltas; las 5 preguntas NB no son bloqueantes; las 5 OOS operativas no son de discovery; las 150+ reglas referenciadas se reconstruirán en sesión dedicada (DEC-FUN-20260817-52).
+**Versión:** 2026-08-17 (actualizado 22:51)
+**Estado del discovery:** `ready_for_integra` — consolidación funcional hecha, 6 contradicciones P0 resueltas, 205 reglas de negocio confirmadas (reconstrucción cerrada DEC-FUN-52), 52 decisiones confirmadas, 5 preguntas NB no bloqueantes sin cerrar, 5 OOS operativos fuera de scope. ATLAS puede emitir `FUNCTIONAL-HANDOFF` a INTEGRA.
 
 ---
 
@@ -46,16 +46,16 @@ Status: consolidado; **NO** es especificación técnica.
 
 ## 4. Bloqueadores para handoff a INTEGRA
 
-| # | Bloqueador | Severidad | Estado al 2026-08-17 22:00 |
+| # | Bloqueador | Severidad | Estado al 2026-08-17 22:51 |
 |---|---|---|---|
 | 1 | Vocabulario único de estados de módulo | P0 | ✅ Resuelto (DEC-FUN-20260817-47) |
 | 2 | Cotización multi-línea vs 1 línea | P0 | ✅ Resuelto (DEC-FUN-20260817-48) |
 | 3 | Base de la comisión (facturado vs cobrado) | P0 | ✅ Resuelto (DEC-FUN-20260817-49) |
 | 4 | Timbrado CFDI (real vs externo) | P0 | ✅ Resuelto (DEC-FUN-20260817-50) |
 | 5 | Conteos (decisiones / reglas / módulos) | P0 | ✅ Resuelto (DEC-FUN-20260817-51) |
-| 6 | Archivo `DECISIONES-V1-20260815.md` no localizado | P0 | ✅ Plan confirmado (DEC-FUN-20260817-52) — reconstrucción en sesión dedicada posterior |
+| 6 | Archivo `DECISIONES-V1-20260815.md` no localizado | P0 | ✅ Reconstrucción cerrada (DEC-FUN-20260817-52) — 205 reglas confirmed |
 
-**Las 6 contradicciones P0 están RESUELTAS.** El handoff a INTEGRA puede emitirse como `conditionally_ready`: las 31 reglas con ID confirmado son el subconjunto firme del contrato, y las 150+ restantes se incorporan cuando se complete la reconstrucción.
+**Las 6 contradicciones P0 están RESUELTAS y la reconstrucción de las 150+ reglas está CERRADA.** ATLAS puede emitir `FUNCTIONAL-HANDOFF` a INTEGRA.
 
 ---
 
@@ -92,9 +92,14 @@ Ver `PREGUNTAS-ABIERTAS.md` sección NB:
 
 ## 8. Handoff
 
-- **Estado actual:** `conditionally_ready` — consolidación funcional hecha, 6 contradicciones P0 resueltas, plan para 150+ reglas en sesión futura.
-- **Próximo paso:** Frank OK de commit del delta actual; sesión dedicada para reconstruir las 150+ reglas (Q-P0-6 / DEC-FUN-20260817-52).
-- **Cuando Frank apruebe:** ATLAS emite `FUNCTIONAL-HANDOFF` a INTEGRA con el subconjunto firme (31 reglas con ID + las 52 decisiones) y la advertencia de las 150+ pendientes.
+- **Estado actual:** `ready_for_integra` — consolidación funcional hecha, 6 contradicciones P0 resueltas, 205 reglas confirmed (DEC-FUN-52 cerrada), 52 decisiones confirmadas.
+- **Próximo paso:** ATLAS emite `FUNCTIONAL-HANDOFF` a INTEGRA con:
+  - 52 decisiones (DECISIONES-FUNCIONALES.md)
+  - 205 reglas firmes + 2 proposed amarradas a Q-NB-1 y Q-NB-2 (REGLAS-DE-NEGOCIO.md)
+  - Flujos y actores completos (FLUJOS-FUNCIONALES.md + ACTORES-Y-PERMISOS.md)
+  - 5 preguntas NB sin cerrar (no bloqueantes) para que INTEGRA las eleve si las necesita
+  - Aviso de la simulación AUDITADA_CON_HALLAZGOS (se rehará cuando se programe)
+- **Las 2 proposed (BR-N230 y BR-N287) y 3 reglas sin ID** se resuelven cuando Frank cierre Q-NB-1 a Q-NB-5.
 
 ---
 
@@ -124,6 +129,7 @@ Ver `PREGUNTAS-ABIERTAS.md` sección NB:
 
 ## 10. Para Frank
 
-- Las 6 contradicciones P0 están resueltas; el delta está persistido en `DECISIONES-FUNCIONALES.md`, `REGLAS-DE-NEGOCIO.md`, `HALLAZGOS.md`, `ESTADO-FUNCIONAL.md`, `INDEX.md`.
-- Indicar si quiere commitear el delta actual (todo listo; ningún commit todavía).
-- Próxima sesión dedicada: reconstruir las 150+ reglas con ATLAS (DEC-FUN-20260817-52).
+- Las 6 contradicciones P0 están resueltas; la reconstrucción de las 150+ reglas está cerrada (205 confirmed).
+- El discovery está `ready_for_integra`.
+- ATLAS puede emitir `FUNCTIONAL-HANDOFF` a INTEGRA en cuanto lo indiques.
+- Las 5 preguntas NB (Q-NB-1 a Q-NB-5) no bloquean el handoff; se elevan a INTEGRA para que las resuelva durante la fase técnica o con Frank si lo necesita.

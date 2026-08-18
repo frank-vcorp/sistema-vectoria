@@ -69,9 +69,9 @@
 
 ## 5. Estado del Discovery
 
-**Discovery funcional: cerrado a nivel de descubrimiento** (alcance, actores, reglas clave con ID, decisiones confirmadas, contradicciones P0 resueltas).
+**Discovery funcional: cerrado a nivel de descubrimiento** (alcance, actores, reglas clave, decisiones confirmadas, contradicciones P0 resueltas).
 
-**Discovery funcional: `conditionally_ready` para handoff a INTEGRA** — 6 contradicciones P0 resueltas, 5 preguntas NB sin cerrar (no bloqueantes), 5 OOS operativos fuera de scope de discovery, sesión futura de reconstrucción de 150+ reglas (DEC-FUN-20260817-52).
+**Discovery funcional: `ready_for_integra`** — 6 contradicciones P0 resueltas, 205 reglas de negocio confirmadas (reconstrucción cerrada DEC-FUN-52), 5 preguntas NB sin cerrar (no bloqueantes), 5 OOS operativos fuera de scope de discovery.
 
 **Implementación: no iniciada.**
 
@@ -82,12 +82,12 @@
 | Ítem | Estado |
 |---|---|
 | Fuente funcional única vigente | ✅ `FUNCTIONAL-BASELINE.md` |
-| Reglas de negocio con ID trazable | ✅ 31 reglas con ID confirmado. 150+ reglas con plan de reconstrucción (DEC-FUN-20260817-52). |
-| Decisiones confirmadas | ✅ 52 decisiones (46 originales + 6 DEC-FUN-20260817-47 a -52 resultantes de la consolidación). |
-| Contradicciones P0 | ✅ Las 6 contradicciones P0 resueltas. 5 marcadas `resolved` en HALLAZGOS. 1 con plan de reconstrucción. |
+| Reglas de negocio con ID trazable | ✅ 205 reglas confirmed (reconstrucción cerrada DEC-FUN-52, Frank confirmó el lote 2026-08-17 22:51). 2 proposed amarradas a Q-NB-1 y Q-NB-2. 3 sin ID amarradas a Q-NB-3, Q-NB-4, Q-NB-5. |
+| Decisiones confirmadas | ✅ 52 decisiones (46 originales + 6 DEC-FUN-47 a -52 resultantes de la consolidación). |
+| Contradicciones P0 | ✅ Las 6 contradicciones P0 resueltas. 5 marcadas `resolved` en HALLAZGOS. 1 con plan de reconstrucción cerrado. |
 | Contradicciones visibles y trazadas | ✅ `HALLAZGOS.md` |
 | Preguntas bloqueantes a Frank | ✅ `PREGUNTAS-ABIERTAS.md` (6 P0 cerradas, 5 NB sin cerrar no bloqueantes) |
 | Simulación validada | ❌ No validada. AUDITADA_CON_HALLAZGOS. Se rehará contra la spec consolidada cuando se programe. |
 | Arquitectura creada | ❌ No (fuera de scope de ATLAS) |
 | Código implementado | ❌ No (fuera de scope) |
-| Commit/push | ⏳ Pendiente OK de Frank (delta actual con las 6 decisiones) |
+| Commit/push | ⏳ Pendiente OK de Frank (delta con reconstrucción de reglas) |
