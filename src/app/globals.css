@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens canónicos VectorIA — SPEC-001 §17.2 (AC-43..AC-46). */
+@layer base {
+  :root {
+    --background: 0 0% 100%; /* #FFFFFF */
+    --foreground: 218 75% 15%; /* #0A1F44 */
+    --card: 0 0% 100%;
+    --card-foreground: 218 75% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 218 75% 15%;
+    --primary: 24 100% 41%; /* #D35400 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 25% 95%;
+    --secondary-foreground: 210 25% 24%; /* #2C3E50 */
+    --muted: 210 25% 95%;
+    --muted-foreground: 210 25% 24%;
+    --accent: 24 100% 41%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 43%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 25% 87%;
+    --input: 210 25% 87%;
+    --ring: 24 100% 41%; /* foco naranja */
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 218 75% 15%; /* #0A1F44 */
+    --foreground: 0 0% 100%;
+    --card: 218 62% 20%;
+    --card-foreground: 0 0% 100%;
+    --popover: 218 62% 20%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 24 100% 41%; /* #D35400 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 26% 28%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 214 26% 28%;
+    --muted-foreground: 220 13% 70%;
+    --accent: 24 100% 41%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 26% 32%;
+    --input: 214 26% 32%;
+    --ring: 24 100% 41%;
+  }
+
+  * { @apply border-border; }
+  html { font-family: Inter, Montserrat, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { @apply bg-background text-foreground antialiased; }
+  :focus-visible { outline: 2px solid #D35400; outline-offset: 2px; }
+}

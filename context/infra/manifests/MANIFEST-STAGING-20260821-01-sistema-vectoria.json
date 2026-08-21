@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "taskId": "IMPL-20260821-01",
+  "specRef": "SPEC-20260820-003",
+  "slug": "sistema-vectoria",
+  "fqdn": "sistema-vectoria.vector-ia.mx",
+  "repository": "frank-vcorp/sistema-vectoria",
+  "branch": "main",
+  "serverUuid": "03tz1uabcrjaihnvrhysbstv",
+  "environment": "staging",
+  "resources": ["project", "environment", "application", "database", "storage"],
+  "application": {
+    "appVariant": "public",
+    "buildPack": "nixpacks",
+    "portsExposes": "3000",
+    "githubAppUuid": null,
+    "privateKeyUuid": null
+  },
+  "database": {
+    "engine": "postgresql",
+    "name": "sistema-vectoria-db"
+  },
+  "storage": {
+    "serviceType": "garage",
+    "name": "sistema-vectoria-storage"
+  },
+  "envOverrides": {}
+}
