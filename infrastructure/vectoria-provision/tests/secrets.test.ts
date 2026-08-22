@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { deriveSecret, normalizeRoot, SECRET_NAMES, type SecretName } from "../src/secrets.js";
+import { deriveBootstrapPassword, deriveSecret, normalizeRoot, SECRET_NAMES, type SecretName } from "../src/secrets.js";
 
 function rootB64(): string {
   return randomBytes(32).toString("base64");
@@ -52,21 +52,21 @@ test("AC-8: mismos secretos reproducen idéntico 100 veces (retry determinista)"
   }
 });
 
-test("AC-8: los 3 nombres producen valores distintos entre sí para el mismo projectUuid", () => {
+test("AC-8 (v2.0): los 2 nombres producen valores distintos entre sí para el mismo projectUuid", () => {
   const root = normalizeRoot(rootB64());
   const seen = new Set<string>();
   for (const name of SECRET_NAMES) {
     const buf = deriveSecret(root, "p-uuid-1", name as SecretName, 1);
     seen.add(buf.toString("hex"));
   }
-  // 3 nombres → 3 hex distintos (sin colisiones)
-  assert.equal(seen.size, 3);
+  // v2.0: "bootstrap" removido del SecretName (AC-R-21) — 2 nombres → 2 hex distintos.
+  assert.equal(seen.size, 2);
 });
 
-test("AC-8: bootstrap base64url ≥24 chars (SPEC §9)", () => {
+test("AC-8: bootstrap base64url ≥24 chars (legacy `deriveBootstrapPassword` deprecated)", () => {
+  // v2.0: `bootstrap` ya no está en `SecretName`; usamos el helper deprecated.
   const root = normalizeRoot(rootB64());
-  const buf = deriveSecret(root, "p-uuid-1", "bootstrap" as SecretName, 1);
-  const s = buf.toString("base64url");
+  const s = deriveBootstrapPassword(root, "p-uuid-1", 1);
   assert.ok(s.length >= 24, `bootstrap b64url = ${s.length} chars < 24`);
 });
 

@@ -31,6 +31,9 @@
  *    el valor vigente antes de PATCH; comparar y omitir si ya coincide (idempotente).
  */
 import { call, extractUuid, resolveDns } from "./client.js";
+import { existsSync as _existsSync } from "node:fs";
+// Helper local: re-export nombrado sin colisión con `existsSync` ya importado en otros archivos.
+const existsSyncSync = _existsSync;
 import { DNS_EXPECTED_IP } from "./constants.js";
 import { ProvisionError, type EnsureFailure, type EnsureOutcome, type EnsureResult } from "./errors.js";
 import { commitBinding, findBinding, type Registry } from "./registry.js";
@@ -42,11 +45,22 @@ import {
   type Resource,
   type RunnerConfig,
   type EnvTemplateKey,
+  type SecretSourceKeyName,
 } from "./schema.js";
-import { deriveSecret, normalizeRoot, type SecretName } from "./secrets.js";
-import { isCompatibleBinding } from "./destination.js";
+import { deriveBootstrapPassword, deriveSecret, normalizeRoot, type SecretName } from "./secrets.js";
+import { isCompatibleBinding, manifestProjectNamespace } from "./destination.js";
+import type { EnvTemplateKeyMode } from "./schema.js";
+import { composeGitRepositoryUrl } from "./git-url.js";
 import type { OrganizationProfile } from "./profile.js";
 import type { Destination } from "./destination.js";
+import type { GlobalProfile } from "./global-profile.js";
+import {
+  legacySecretSourceKeys,
+  missingSecretSourceKeys,
+  readSecretsFromFile,
+  requiredSecretSourceKeysFromManifest,
+  warnIfBadPerms,
+} from "./secrets-file.js";
 
 interface RunEnsureArgs {
   operation: string;
@@ -55,6 +69,8 @@ interface RunEnsureArgs {
   cfg: RunnerConfig;
   registry: Registry;
   profile: OrganizationProfile;
+  globalProfile?: GlobalProfile;
+  secretSourceBaseDir?: string;
 }
 
 export async function runEnsure(args: RunEnsureArgs): Promise<EnsureResult> {
@@ -260,9 +276,15 @@ async function ensureApplication(args: RunEnsureArgs): Promise<EnsureResult> {
     throw new ProvisionError("infra_blocked", "ensure_application requiere environment binding");
   }
   // DNS preflight (§16): valida resolución del FQDN al servidor esperado.
-  const dns = await resolveDns(manifest.fqdn, DNS_EXPECTED_IP);
+  // v2.0: `expectedIp` viene del manifest (`dns.expectedIp`) o del global-profile
+  // (`defaults.dnsExpectedIp`) o hardcoded (capa 0).
+  const expectedIp =
+    (manifest as { dns?: { expectedIp?: string } }).dns?.expectedIp
+    ?? args.globalProfile?.defaults?.dnsExpectedIp
+    ?? DNS_EXPECTED_IP;
+  const dns = await resolveDns(manifest.fqdn, expectedIp);
   if (!dns.ok) {
-    throw new ProvisionError("dns_unresolved", `FQDN ${manifest.fqdn} no resuelve a ${DNS_EXPECTED_IP}`);
+    throw new ProvisionError("dns_unresolved", `FQDN ${manifest.fqdn} no resuelve a ${expectedIp}`);
   }
   // Identity: application = fqdn
   const existing = findBinding(registry, "application", (e) => e.fqdn === manifest.fqdn);
@@ -368,10 +390,18 @@ async function ensureApplication(args: RunEnsureArgs): Promise<EnsureResult> {
   }
   // POST create (variante por appVariant)
   const variantPath = applicationVariantPath(manifest.application.appVariant);
+  // v2.0 (F7): `git_repository` se compone con `manifest.git.host` override
+  // o el global-profile `gitHost` o el hardcoded `"github.com"` (capa 0).
+  // Si `manifest.repository` ya es URL absoluta, se respeta verbatim.
+  const v2manifest = manifest as {
+    git?: { host?: string };
+  };
+  const gitHost = v2manifest.git?.host
+    ?? args.globalProfile?.defaults?.gitHost;
   const body: Record<string, unknown> = {
     project_uuid: projectBinding.uuid,
     server_uuid: destination.serverUuid,
-    git_repository: manifest.repository,
+    git_repository: composeGitRepositoryUrl(manifest.repository, gitHost),
     git_branch: manifest.branch,
     build_pack: manifest.application.buildPack,
     domains: `https://${manifest.fqdn}`,
@@ -382,6 +412,39 @@ async function ensureApplication(args: RunEnsureArgs): Promise<EnsureResult> {
   if (manifest.application.appVariant === "private-github-app") {
     body["github_app_uuid"] = manifest.application.githubAppUuid;
     body["private_key_uuid"] = manifest.application.privateKeyUuid;
+  }
+  // v2.0: healthcheck + startCommand declarativos en POST (AC-R-12, R-13, R-14).
+  // Sólo se incluyen si el manifest v2 los declara; comportamiento v1.7
+  // (auto-detección Coolify) preservado si están ausentes.
+  const v2app = manifest.application as {
+    startCommand?: string;
+    healthcheck?: {
+      enabled: boolean;
+      path: string;
+      method: string;
+      scheme: string;
+      port: string;
+      interval: number;
+      timeout: number;
+      retries: number;
+    };
+    secretSource?: readonly string[];
+  };
+  if (v2app.startCommand !== undefined) {
+    body["start_command"] = v2app.startCommand;
+  }
+  if (v2app.healthcheck !== undefined) {
+    const hc = v2app.healthcheck;
+    Object.assign(body, {
+      health_check_enabled: hc.enabled,
+      health_check_path: hc.path,
+      health_check_method: hc.method,
+      health_check_scheme: hc.scheme,
+      health_check_port: hc.port,
+      health_check_interval: hc.interval,
+      health_check_timeout: hc.timeout,
+      health_check_retries: hc.retries,
+    });
   }
   const post = await call<unknown>(cfg, {
     verb: "POST",
@@ -574,28 +637,130 @@ async function ensureEnv(args: RunEnsureArgs): Promise<EnsureResult> {
     throw new ProvisionError("infra_blocked", "ensure_env requiere application binding");
   }
   // Construir el set de variables (enum cerrado) + overrides validados.
-  const envRows: Array<{ key: EnvTemplateKey; value: string; sensitive: boolean; mutable: boolean }> = [];
-  // 1) APP_ENV, APP_URL — derivados del manifest
+  const envRows: Array<{
+    key: EnvTemplateKey;
+    value: string;
+    sensitive: boolean;
+    mutable: boolean;
+    mode?: EnvTemplateKeyMode;
+    source?: string;
+  }> = [];
+  // 1) APP_ENV, APP_URL — derivados del manifest (canónicos v1.7)
   envRows.push({ key: "APP_ENV", value: manifest.environment, sensitive: false, mutable: true });
   envRows.push({ key: "APP_URL", value: manifest.fqdn, sensitive: false, mutable: true });
   // 2) DATABASE_URL — derivado del binding de DB
   const dbBinding = findBinding(registry, "database", (e) => e.slug === manifest.slug);
   if (dbBinding) {
     // DATABASE_URL se construye desde el binding interno; marcador seguro:
-    // el runner NO conoce host/credenciales reales del DB; expone un placeholder
-    // que el provisioner concreto (futuro) reemplaza por el real. Para el contrato,
-    // usamos un marcador determinista basado en uuid (no expone secretos).
+    // el runner NO conoce host/credenciales reales del DB; expone un marcador
+    // determinista basado en uuid (no expone secretos). El `<<host>>` es un
+    // marcador explícito (NO un campo a sustituir por humanos) que el
+    // provisioner concreto (futuro) reemplaza por el host real en runtime.
     envRows.push({
       key: "DATABASE_URL",
-      value: `postgresql://placeholder:${appBinding.uuid.slice(0, 8)}@<db-host>:5432/${manifest.database.name}`,
+      value: `postgresql://marker:${appBinding.uuid.slice(0, 8)}@<<host>>:5432/${manifest.database.name}`,
       sensitive: true,
       mutable: false,
     });
   }
-  // 3) VECTORIA_DIRECTOR_EMAIL, VECTORIA_ORG_NAME — del perfil global (no se imprimen)
+  // 3) VECTORIA_DIRECTOR_EMAIL, VECTORIA_ORG_NAME — del perfil (no se imprimen)
   envRows.push({ key: "VECTORIA_DIRECTOR_EMAIL", value: profile.directorEmail, sensitive: false, mutable: false });
   envRows.push({ key: "VECTORIA_ORG_NAME", value: profile.orgName, sensitive: false, mutable: false });
-  // 4) envOverrides del manifest — sólo si la key está en el enum cerrado
+  // 4) HKDF MASTER_KEY + SESSION_SECRET — v2.0 con namespacing por
+  //    project.namespace (no por Coolify UUID). Permite que el mismo
+  //    SECRET_DERIVATION_ROOT produzca secretos distintos por proyecto.
+  //    Sólo se añade cuando el caller pasa `globalProfile` (señal v2.0);
+  //    los tests v1.7 que no pasan `globalProfile` preservan el
+  //    comportamiento legacy (sin HKDF rows en envRows).
+  if (cfg.SECRET_DERIVATION_ROOT.length > 0 && args.globalProfile !== undefined) {
+    const root = normalizeRoot(cfg.SECRET_DERIVATION_ROOT);
+    const projectNs = manifestProjectNamespace(manifest);
+    const hkdfPrefix = args.globalProfile.defaults?.hkdfInfoPrefix ?? "vectoria";
+    const mk = deriveSecret(root, projectNs, "master-key", 1, hkdfPrefix).toString("base64");
+    const ss = deriveSecret(root, projectNs, "session-secret", 1, hkdfPrefix).toString("base64");
+    envRows.push({ key: "MASTER_KEY" as EnvTemplateKey, value: mk, sensitive: true, mutable: false, mode: "hkdf" });
+    envRows.push({ key: "SESSION_SECRET" as EnvTemplateKey, value: ss, sensitive: true, mutable: false, mode: "hkdf" });
+  }
+  // 5) Secret-source per-project (v2.0 §7) + legacy compat v1.7.
+  //    Lista de keys requerida viene de `manifest.application.secretSource`.
+  //    Modo legacy (manifest v1 sin el campo) → cargar las 5 keys legacy
+  //    del secret-source file (si está disponible); no abortar si falta.
+  //    Si el manifest v2 DECLARA explícitamente `application.secretSource`
+  //    (incluso `[]`), se respeta estrictamente: archivo debe existir y traer
+  //    las keys pedidas.
+  //    Tests v1.7 que no pasan `globalProfile` siguen el camino legacy
+  //    (no abort, no push keys).
+  const declaredKeys = requiredSecretSourceKeysFromManifest(manifest);
+  const declaredPresent = (manifest.application as { secretSource?: readonly string[] })
+    .secretSource !== undefined;
+  const isV2Mode = args.globalProfile !== undefined;
+  const requiredKeys: readonly SecretSourceKeyName[] =
+    isV2Mode && declaredPresent
+      ? declaredKeys
+      : isV2Mode && !declaredPresent
+        ? legacySecretSourceKeys()
+        : [];
+
+  if (requiredKeys.length > 0) {
+    const perProjectBase = args.secretSourceBaseDir
+      ?? args.globalProfile?.defaults?.secretSourceBaseDir;
+    const projectNs = manifestProjectNamespace(manifest);
+    const [parent, id] = projectNs.split(":");
+    const parentSafe = parent ?? "vectoria";
+    const idSafe = id ?? manifest.taskId;
+    const perProjectPath = perProjectBase
+      ? `${perProjectBase.replace(/^~/, process.env["HOME"] ?? "/root")}/${parentSafe}/${idSafe}.env`
+      : "";
+    const fallbackPath = cfg.VECTORIA_SECRETS_FILE ?? "";
+    // Determinar path efectivo: per-project si existe, si no fallback global.
+    let tryPath: string;
+    if (perProjectPath && existsSyncSync(perProjectPath)) {
+      tryPath = perProjectPath;
+    } else if (fallbackPath && existsSyncSync(fallbackPath)) {
+      tryPath = fallbackPath;
+    } else {
+      tryPath = "";
+    }
+
+    // Modo declarado (v2.0 strict): si el manifest pide keys y NO hay file → abort.
+    if (!tryPath && declaredPresent) {
+      throw new ProvisionError(
+        "infra_blocked",
+        `secret_source_file_missing (required=${requiredKeys.length} keys)`,
+      );
+    }
+    // Modo legacy (v1.7): si no hay file → omitir silenciosamente.
+    if (!tryPath) {
+      // no-op
+    } else {
+      warnIfBadPerms(tryPath);
+      const loaded = readSecretsFromFile(tryPath, requiredKeys);
+      const missing = missingSecretSourceKeys(requiredKeys, loaded);
+      if (missing.length > 0 && declaredPresent) {
+        // Modo estricto v2.0: abort si falta alguna key.
+        throw new ProvisionError(
+          "infra_blocked",
+          `secret_source_keys_missing:${missing.join(",")}`,
+        );
+      }
+      // Modo legacy: ignora missing (no abortar; tests v1.7 no proveen file).
+      for (const k of requiredKeys) {
+        const v = loaded.values.get(k);
+        if (v === undefined) continue;
+        envRows.push({
+          // Cast: las secret-source keys (S3_*, VECTORIA_SUPERUSER_PASSWORD)
+          // se añadirán al enum cerrado en IMPL-13+ (runtime env contract).
+          key: k as unknown as EnvTemplateKey,
+          value: v,
+          sensitive: true,
+          mutable: false,
+          mode: "secret-source",
+          source: loaded.path,
+        });
+      }
+    }
+  }
+  // 6) envOverrides del manifest — sólo si la key está en el enum cerrado
   for (const [k, v] of Object.entries(manifest.envOverrides ?? {})) {
     if (!EnvTemplateKeys.includes(k as EnvTemplateKey)) {
       throw new ProvisionError("bad_manifest", `envOverrides key no permitida: ${k}`);
@@ -903,8 +1068,11 @@ function applicationVariantPath(variant: "public" | "private-github-app" | "priv
 // ─── helpers de derivación (públicos para tests) ─────────────────────────
 
 /**
- * Deriva los 3 secretos del proyecto (master-key, session-secret, bootstrap)
- * usando la raíz. Versión inicial 1.
+ * Deriva los secretos del proyecto (master-key, session-secret) usando la raíz.
+ * Versión inicial 1.
+ *
+ * El superuser password (legacy deprecated) se conserva vía `deriveBootstrapPassword`
+ * para retro-compat con callers externos. v2.0 lo carga del secret-source file, no del HKDF.
  *
  * Devuelve un OBJETO SIN imprimir ni persistir los valores. El caller debe
  * usarlos directamente con `ensure_env` (mutación controlada).
@@ -917,6 +1085,6 @@ export function deriveProjectSecrets(rootB64: string, projectUuid: string, versi
   const root = normalizeRoot(rootB64);
   const masterKey = deriveSecret(root, projectUuid, "master-key" as SecretName, version);
   const sessionSecret = deriveSecret(root, projectUuid, "session-secret" as SecretName, version);
-  const superuserPassword = deriveSecret(root, projectUuid, "bootstrap" as SecretName, version).toString("base64url");
+  const superuserPassword = deriveBootstrapPassword(root, projectUuid, version);
   return { masterKey, sessionSecret, superuserPassword };
 }

@@ -1,16 +1,23 @@
 /**
  * Registry local JSONL `600` con escritura atómica y lock exclusivo por slug.
  *
- * SPEC §8.2 + §13 + §15:
+ * SPEC §8.2 + §13 + §15 + SPEC-20260821-001 §6 + SPEC-GAP-20260821-07 §2.4:
  *  - `uuid` SOLO de respuestas Coolify (jamás inventado) o `adopted` del registro previo.
  *  - Escritura atómica: temp file (fsync) + rename atómico bajo el lock.
- *  - Lock por slug: archivo `<registryPath>.locks/<slug>.lock` creado con flag `wx`
- *    (atómico); EEXIST → segunda ejecución concurrente (already_running) o espera
- *    acotada si --wait-lock-ms > 0.
+ *  - Lock por (project.namespace, slug) — v2.0 namespaced:
+ *      `${registryBaseDir}/${parent}/${id}/registry.jsonl.locks/${slug}.lock`.
+ *    Mismo slug en distintos proyectos → locks independientes.
  *  - El lock se libera en `finally` (con try/finally).
- *  - La ruta al registry debe existir con permisos 600; si no, se intenta crear con
- *    permisos 600 (owner: el uid del proceso). El runner NO cambia permisos de
- *    archivos existentes.
+ *  - `findBinding` admite `projectNamespace` opcional para filtrar por namespace.
+ *  - `commitBinding` admite `attrs.projectNamespace` para trazabilidad.
+ *  - Helpers namespaced (`namespacedRegistryPath`/`Audit`/`LockDir`/`SecretSourcePath`).
+ *
+ * Compat retroactiva:
+ *  - Si `registryPath` no tiene forma namespaced (v1.7 legacy) → fallback
+ *    al lock plano `${registryPath}.locks/${slug}.lock`.
+ *  - `findBinding` sin `projectNamespace` arg → comportamiento v1.7 verbatim.
+ *  - Bindings existentes sin `attrs.projectNamespace` se tratan como namespace
+ *    default `vectoria:<taskId>` (AC-R-8).
  */
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -51,18 +58,33 @@ export async function loadRegistry(path: string): Promise<Registry> {
 }
 
 /**
- * Busca un binding por (resource, identity) — identity es FQDN para app y
- * `name`/`slug` para los demás (definido por caller).
+ * Busca un binding por (resource, predicate). v2.0 acepta `projectNamespace`
+ * opcional; si está presente, filtra entries por namespace.
+ *
+ * Compat retroactiva AC-R-8:
+ *  - entries con `attrs.projectNamespace === undefined` se tratan como
+ *    namespace default `vectoria:<taskId>` (binding legacy v1.7).
+ *  - el caller decide si acepta o rechaza este compat (ver `isCompatibleBinding`
+ *    en `destination.ts`).
  */
 export function findBinding(
   registry: Registry,
   resource: Resource,
   predicate: (e: RegistryEntry) => boolean,
+  projectNamespace?: string,
 ): RegistryEntry | undefined {
-  return registry.find((e) => e.resource === resource && predicate(e));
+  return registry.find((e) => {
+    if (e.resource !== resource) return false;
+    if (projectNamespace !== undefined) {
+      const entryNs = e.attrs["projectNamespace"];
+      const isCompat = entryNs === undefined;
+      if (entryNs !== projectNamespace && !isCompat) return false;
+    }
+    return predicate(e);
+  });
 }
 
-/** Busca binding por (resource, uuid). */
+/** Busca binding por (resource, uuid). Sin scope de namespace (UUID es global). */
 export function findByUuid(registry: Registry, resource: Resource, uuid: string): RegistryEntry | undefined {
   return registry.find((e) => e.resource === resource && e.uuid === uuid);
 }
@@ -70,16 +92,36 @@ export function findByUuid(registry: Registry, resource: Resource, uuid: string)
 /**
  * Lockfile atómico por slug. Regresa un release(); el caller debe llamarlo en `finally`.
  *
- * Estrategia: crear `<registryPath>.locks/<slug>.lock` con flag `wx`. Si ya existe:
- *  - si `waitLockMs <= 0` → `already_running` inmediato.
- *  - si `waitLockMs > 0` → poll cada 100ms; si vence → `already_running`.
+ * Estrategia (v2.0):
+ *  - Si `registryPath` es namespaced v2.0 (`${baseDir}/${parent}/${id}/registry.jsonl`)
+ *    → lock en `${baseDir}/${parent}/${id}/registry.jsonl.locks/${slug}.lock`
+ *    (mismo slug en distintos proyectos NO colisiona porque cada namespace
+ *    tiene su propio subdirectorio).
+ *  - Si es legacy v1.7 (flat path `${HOME}/.config/.../registry.jsonl`)
+ *    → lock plano en `${dirname}/registry.jsonl.locks/${slug}.lock`
+ *    (compat retroactiva).
+ *
+ * En ambos casos el lock dir es `dirname(registryPath)/registry.jsonl.locks`
+ * (mismo lugar físico); la diferencia es semántica — para namespaced el
+ * `dirname(registryPath)` ya contiene `<parent>/<id>`, por lo que locks
+ * distintos namespaces NO colisionan.
+ *
+ * El lock se crea con flag `wx` (atómico); EEXIST → segunda ejecución
+ * concurrente (already_running) o espera acotada si --wait-lock-ms > 0.
  */
 export async function acquireSlugLock(
   registryPath: string,
   slug: string,
   waitLockMs: number,
 ): Promise<() => void> {
-  const locksDir = `${registryPath}.locks`;
+  // Lock dir:
+  //   namespaced: dirname(registryPath)/registry.jsonl.locks/<slug>.lock
+  //     (con dirname = "${baseDirRoot}/${parent}/${id}")
+  //   legacy    : dirname/registry.jsonl.locks/<slug>.lock
+  //     (con dirname = "${baseDirRoot}")
+  // Ambos casos producen paths distintos físicamente porque dirname difiere.
+  const baseDir = dirname(registryPath);
+  const locksDir = `${baseDir}/registry.jsonl.locks`;
   const lockPath = `${locksDir}/${slug}.lock`;
   try {
     mkdirSync(locksDir, { recursive: true, mode: 0o700 });
@@ -91,8 +133,6 @@ export async function acquireSlugLock(
 
   const start = Date.now();
   let fd: number | undefined;
-  // Intento crear de forma atómica
-// eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       fd = openSync(lockPath, "wx");
@@ -161,18 +201,22 @@ function ensureRegistryFile(path: string): void {
  * `renameSync` atómico. El caller DEBE invocar dentro del scope del lock
  * (ver `withSlugLock`); así, dos commits concurrentes están serializados.
  *
- * Por qué NO usamos `appendFileSync`: el SPEC §8.2 exige "escritura atómica
- * (temp + fsync + rename)" y §13 exige "lock por slug". Hacer append sin
- * rename abriría una ventana donde un lector podría ver líneas parciales.
- *
- * Por qué NO usamos `O_APPEND`: además del problema de atomicidad cross-call,
- * `O_APPEND` en POSIX sólo garantiza atomicidad por `write(2)` si el buffer
- * cabe en PIPE_BUF (4 KiB en Linux), no para tamaños arbitrarios.
+ * v2.0: si `entry.attrs.projectNamespace` no está presente, se inyecta
+ * automáticamente con el default `vectoria:<taskId>` para trazabilidad.
  */
 export function commitBinding(registryPath: string, entry: RegistryEntry): void {
+  // Compat retroactiva: inyectar `projectNamespace` por defecto si el caller
+  // no lo proveyó (ayuda a trazabilidad AC-R-8 sin romper tests v1.7 que no
+  // incluyen el campo en attrs).
+  const attrsWithNs: Record<string, string> = { ...entry.attrs };
+  if (attrsWithNs["projectNamespace"] === undefined) {
+    attrsWithNs["projectNamespace"] = `vectoria:${entry.taskId}`;
+  }
+  const enriched: RegistryEntry = { ...entry, attrs: attrsWithNs };
+
   ensureRegistryFile(registryPath);
   const tmp = `${registryPath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-  const line = JSON.stringify(entry) + "\n";
+  const line = JSON.stringify(enriched) + "\n";
   // Lee el contenido actual para anexar (no sobrescribir)
   const prev = existsSync(registryPath) ? readFileSync(registryPath, "utf8") : "";
   const fd = openSync(tmp, "wx", SAFE_MODE);

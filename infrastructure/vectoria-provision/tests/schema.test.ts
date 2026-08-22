@@ -45,9 +45,10 @@ const VALID_MANIFEST = {
   envOverrides: {},
 };
 
-test("schema: manifest canónico del SPEC §8.1 pasa", () => {
+test("schema: manifest canónico del SPEC §8.1 pasa (v2.0: parse normaliza v1→v2)", () => {
   const m = ManifestSchema.parse(VALID_MANIFEST);
-  assert.equal(m.v, 1);
+  // v2.0 schema normaliza manifests v1 a v2 estricto vía transform (AC-R-1).
+  assert.equal(m.v, 2);
   assert.equal(m.slug, "sistema-vectoria");
 });
 

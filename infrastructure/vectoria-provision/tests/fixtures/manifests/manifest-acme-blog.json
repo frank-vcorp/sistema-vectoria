@@ -1,0 +1,39 @@
+{
+  "v": 2,
+  "taskId": "IMPL-20260821-XX-acme",
+  "specRef": "SPEC-20260821-001",
+  "project": {
+    "id": "blog",
+    "parent": "acme-corp"
+  },
+  "slug": "blog",
+  "fqdn": "blog.acme-corp.example",
+  "repository": "acme-corp/blog",
+  "branch": "main",
+  "serverUuid": "OTHER-UUID-ACME",
+  "environment": "production",
+  "resources": ["project", "environment", "application"],
+  "application": {
+    "appVariant": "public",
+    "buildPack": "nixpacks",
+    "portsExposes": "3000",
+    "githubAppUuid": null,
+    "privateKeyUuid": null,
+    "startCommand": "pnpm start",
+    "healthcheck": {
+      "enabled": true,
+      "path": "/api/health",
+      "method": "GET",
+      "scheme": "http",
+      "port": "3000",
+      "interval": 30,
+      "timeout": 5,
+      "retries": 3
+    },
+    "secretSource": ["S3_ENDPOINT", "S3_BUCKET"]
+  },
+  "database": { "engine": "postgresql", "name": "blog-db" },
+  "storage": { "serviceType": "garage", "name": "blog-storage" },
+  "dns": { "zone": "acme-corp.example", "expectedIp": "10.0.0.5" },
+  "envOverrides": {}
+}

@@ -1,8 +1,8 @@
 {
   "name": "vectoria-provision",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Runner one-shot CLI for idempotent Coolify provisioning (SPEC-20260820-003, ADR-20260820-03 v1.0 SOL-18).",
+  "description": "Runner one-shot CLI for idempotent Coolify provisioning. v2.0 baseline reusable multi-proyecto (SPEC-20260821-001 + ADR-20260821-01).",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -12,7 +12,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "start": "node dist/index.js",
-    "test": "node --test --import tsx tests/*.test.ts",
+    "test": "node --test --import tsx 'tests/*.test.ts' 'tests/e2e/*.test.ts'",
     "test:lock": "node --test --import tsx tests/lock.test.ts"
   },
   "dependencies": {

@@ -1,34 +1,18 @@
-#!/usr/bin/env node
 /**
- * vectoria-provision — Runner one-shot CLI for idempotent Coolify provisioning.
+ * index.ts — vectoria-provision v2.0 entrypoint
  *
- * Implements SPEC-20260820-003 v1.0 (SOL-18):
- *  - 6 verbos: ensure_project, ensure_environment, ensure_application,
- *    ensure_database, ensure_storage, ensure_env.
- *  - GET/reconcile antes de POST/PATCH; 409 reconciliable, 4xx terminal,
- *    timeout/5xx reconcile.
- *  - Registry JSONL local `600`, escritura atómica, lock por slug.
- *  - HKDF-SHA256 versionado para MASTER_KEY/SESSION_SECRET/bootstrap.
- *  - Auditoría redactada (nunca secretos, tokens, ni valores).
- *  - Destino: override → binding existente → 03tz1uabcrjaihnvrhysbstv.
- *  - Sin daemon, sin socket, sin broker, sin systemd, sin nftables.
+ * SPEC-20260820-003 v1.7 + SPEC-20260821-001 + ADR-20260821-01 v1.0.
  *
- * Entradas:
- *   --manifest=<path>     ruta al manifest JSON canónico
- *   --operation=<verb>    verbo ensure_*
- *   [--registry=<path>]   ruta al registry JSONL (default ~/.config/kilo/vectoria-provision/registry.jsonl)
- *   [--audit=<path>]      ruta al audit JSONL    (default ~/.config/kilo/vectoria-provision/audit.jsonl)
- *   [--profile=<path>]    ruta al organization-profile.json (default ~/.config/kilo/vectoria-provision/organization-profile.json)
- *   [--wait-lock-ms=<ms>]  espera máxima por lock por slug (default 0 → fail-fast already_running)
+ * Cambios v2.0:
+ *  - Carga global-profile (WARN + fallback si ausente; no aborta).
+ *  - Computa paths namespaced: `${baseDir}/${project.parent}/${project.id}/`.
+ *  - HKDF con prefijo global-profile + project.namespace.
+ *  - Per-project secret-source file con fallback legacy.
+ *  - Audit enrichido con `projectParent`/`projectId`.
+ *  - `resolveServerUuid` con global-profile (3er arg).
  *
- * Salida (stdout): JSON estructurado con el resultado de la operación.
- * Salida (stderr): logs operativos sin secretos.
- * Exit codes:
- *   0  ok (created | adopted)
- *   2  error de operación (ensure_*) — el cuerpo del stdout contiene {ok:false,error:{code,message}}
- *   3  error de manifest/configuración
- *   4  lock concurrente (already_running) cuando --wait-lock-ms=0
- *   70 error del launcher (archivo de secretos ausente, permisos, etc.)
+ * Compat retroactiva: el manifest v1 vigente sigue parseando y ejecutando
+ * el ciclo LIVE sin cambios (AC-R-1).
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -40,10 +24,18 @@ import {
   type RunnerConfig,
 } from "./schema.js";
 import { runEnsure } from "./ensure.js";
-import { ensureDestination, resolveServerUuid } from "./destination.js";
+import { ensureDestination, manifestProjectNamespace, resolveServerUuid } from "./destination.js";
 import { appendAudit } from "./audit.js";
 import { loadRegistry, withSlugLock } from "./registry.js";
 import { loadOrganizationProfile } from "./profile.js";
+import {
+  loadGlobalProfile,
+  namespacedAuditPath,
+  namespacedLockDir,
+  namespacedRegistryPath,
+  namespacedSecretSourcePath,
+  type GlobalProfile,
+} from "./global-profile.js";
 import {
   ProvisionError,
   type ErrorCode,
@@ -56,6 +48,7 @@ interface ParsedArgs {
   registry?: string;
   audit?: string;
   profile?: string;
+  globalProfile?: string;
   waitLockMs?: number;
   help: boolean;
 }
@@ -87,6 +80,10 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
       out.profile = raw.includes("=") ? (raw.split("=", 2)[1] ?? "") : "";
       continue;
     }
+    if (raw === "--global-profile" || raw.startsWith("--global-profile=")) {
+      out.globalProfile = raw.includes("=") ? (raw.split("=", 2)[1] ?? "") : "";
+      continue;
+    }
     if (raw === "--wait-lock-ms" || raw.startsWith("--wait-lock-ms=")) {
       const v = raw.includes("=") ? (raw.split("=", 2)[1] ?? "") : "";
       const n = Number.parseInt(v, 10);
@@ -101,13 +98,13 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
   return out;
 }
 
-const USAGE = `vectoria-provision — runner one-shot (SPEC-20260820-003)
+const USAGE = `vectoria-provision — runner one-shot (SPEC-20260820-003 + SPEC-20260821-001)
 
 Uso:
   vectoria-provision \\
     --manifest=<path> \\
     --operation=<ensure_project|ensure_environment|ensure_application|ensure_database|ensure_storage|ensure_env> \\
-    [--registry=<path>] [--audit=<path>] [--profile=<path>] \\
+    [--registry=<path>] [--audit=<path>] [--profile=<path>] [--global-profile=<path>] \\
     [--wait-lock-ms=<ms>]
 
 Entorno (inyectado por el launcher mínimo-privilegio):
@@ -171,13 +168,18 @@ async function main(): Promise<number> {
     manifest = ManifestSchema.parse(manifestRaw);
   } catch (e: unknown) {
     if (e instanceof z.ZodError) {
-      emitFailure("bad_manifest", "manifest no cumple schema v1", { issues: e.issues.map((i) => ({ path: i.path, message: i.message })) });
+      emitFailure("bad_manifest", "manifest no cumple schema", { issues: e.issues.map((i) => ({ path: i.path, message: i.message })) });
       return 3;
     }
     throw e;
   }
 
-  // 2. Configuración del runner desde env (el launcher inyecta las 3 vars secretas + DERIVATION_ROOT)
+  // 2. Cargar global-profile (WARN + fallback si ausente; no aborta)
+  const globalProfile: GlobalProfile = loadGlobalProfile(
+    parsed.globalProfile ?? process.env["VECTORIA_PROVISION_GLOBAL_PROFILE"],
+  );
+
+  // 3. Configuración del runner desde env (el launcher inyecta las 3 vars secretas + DERIVATION_ROOT)
   const cfg: RunnerConfig = RunnerConfigSchema.parse({
     COOLIFY_READ_TOKEN: process.env["COOLIFY_READ_TOKEN"] ?? "",
     COOLIFY_WRITE_TOKEN: process.env["COOLIFY_WRITE_TOKEN"] ?? "",
@@ -189,22 +191,43 @@ async function main(): Promise<number> {
     PROVISION_AUDIT_PATH: parsed.audit ?? process.env["PROVISION_AUDIT_PATH"],
     PROVISION_PROFILE_PATH: parsed.profile ?? process.env["PROVISION_PROFILE_PATH"],
     PROVISION_WAIT_LOCK_MS: parsed.waitLockMs !== undefined ? String(parsed.waitLockMs) : undefined,
+    VECTORIA_SECRETS_FILE: process.env["VECTORIA_SECRETS_FILE"],
   });
 
-  // 3. Cargar registry + profile
-  const registry = await loadRegistry(cfg.PROVISION_REGISTRY_PATH);
-  const profile = await loadOrganizationProfile(cfg.PROVISION_PROFILE_PATH);
+  // 4. Computar paths namespaced (overridable por env vars; default: global-profile + project.namespace)
+  const envRegistryDir = process.env["VECTORIA_PROVISION_REGISTRY_DIR"];
+  const envAuditDir = process.env["VECTORIA_PROVISION_AUDIT_DIR"];
+  const registryBase: string = envRegistryDir ?? globalProfile.defaults.registryBaseDir;
+  const auditBase: string = envAuditDir ?? globalProfile.defaults.auditBaseDir;
+  const projectNs = manifestProjectNamespace(manifest);
+  const [nsParent, nsId] = projectNs.split(":");
+  const parentSafe: string = nsParent ?? "vectoria";
+  const idSafe: string = nsId ?? manifest.taskId;
+  const registryPath = namespacedRegistryPath(registryBase, parentSafe, idSafe);
+  const auditPath = namespacedAuditPath(auditBase, parentSafe, idSafe);
+  // Mantener cfg paths apuntando a los namespaced (overridable por env var aún gana).
+  cfg.PROVISION_REGISTRY_PATH = registryPath;
+  cfg.PROVISION_AUDIT_PATH = auditPath;
+  // Lock dir derivado (informativo; `withSlugLock` recalcula desde registryPath).
+  void namespacedLockDir(registryBase, parentSafe, idSafe);
 
-  // 4. Lock por slug
+  // 5. Cargar registry + profile (con global-profile + parent del manifest)
+  const registry = await loadRegistry(registryPath);
+  const profile = await loadOrganizationProfile(
+    cfg.PROVISION_PROFILE_PATH,
+    globalProfile,
+    parentSafe,
+  );
+
+  // 6. Lock por slug
   const waitLockMs = cfg.PROVISION_WAIT_LOCK_MS;
   try {
     const result: EnsureResult = await withSlugLock(
-      cfg.PROVISION_REGISTRY_PATH,
+      registryPath,
       manifest.slug,
       waitLockMs,
       async () => {
-        // Resolver destino: override → binding → default
-        const serverUuid = resolveServerUuid(manifest, registry);
+        const serverUuid = resolveServerUuid(manifest, registry, globalProfile);
         const destination = await ensureDestination(manifest, registry, serverUuid);
         return runEnsure({
           operation: parsed.operation!,
@@ -213,15 +236,27 @@ async function main(): Promise<number> {
           cfg,
           registry,
           profile,
+          globalProfile,
+          secretSourceBaseDir: namespacedSecretSourcePath(
+            globalProfile.defaults.secretSourceBaseDir,
+            parentSafe,
+            idSafe,
+          ).replace(/\/[^/]+$/, ""), // base dir, sin filename
         });
       },
     );
-    appendAudit(cfg.PROVISION_AUDIT_PATH, {
+    appendAudit(auditPath, {
       ts: new Date().toISOString(),
       taskId: manifest.taskId,
       slug: manifest.slug,
+      projectParent: manifest.project?.parent ?? undefined,
+      projectId: manifest.project?.id ?? undefined,
       op: parsed.operation!,
-      target: { fqdn: manifest.fqdn },
+      target: {
+        fqdn: manifest.fqdn,
+        projectParent: manifest.project?.parent ?? undefined,
+        projectId: manifest.project?.id ?? undefined,
+      },
       result: result.ok ? result.status : "failure",
       uuid: result.ok ? result.uuid : undefined,
     });
@@ -229,16 +264,22 @@ async function main(): Promise<number> {
     return result.ok ? 0 : 2;
   } catch (e: unknown) {
     if (e instanceof ProvisionError) {
-      appendAudit(cfg.PROVISION_AUDIT_PATH, {
+      appendAudit(auditPath, {
         ts: new Date().toISOString(),
         taskId: manifest.taskId,
         slug: manifest.slug,
+        projectParent: manifest.project?.parent ?? undefined,
+        projectId: manifest.project?.id ?? undefined,
         op: parsed.operation!,
-        target: { fqdn: manifest.fqdn },
+        target: {
+          fqdn: manifest.fqdn,
+          projectParent: manifest.project?.parent ?? undefined,
+          projectId: manifest.project?.id ?? undefined,
+        },
         result: "failure",
         code: e.code,
       });
-      emitFailure(e.code, e.message);
+      emitFailure(e.code, e.message, e.details);
       if (e.code === "already_running") return 4;
       return 2;
     }
@@ -249,7 +290,6 @@ async function main(): Promise<number> {
 main().then(
   (code) => process.exit(code),
   (e: unknown) => {
-    // Defense-in-depth: nunca imprimir el mensaje crudo si contiene tokens.
     const msg = e instanceof Error ? e.message : String(e);
     process.stderr.write(`[vectoria-provision] fatal: ${msg.replace(/Bearer\s+[A-Za-z0-9._\-+/=]{4,}/g, "Bearer <redacted>")}\n`);
     process.exit(1);
