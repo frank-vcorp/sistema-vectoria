@@ -103,3 +103,71 @@ export function safeErrorMessage(msg: string, tokens?: readonly string[]): strin
   }
   return s;
 }
+
+/**
+ * v2.0 · Redacción extensible (SPEC-20260821-001 §11 + AC-R-22).
+ *
+ * Variante de `redact` que admite keys declaradas dinámicamente por el
+ * global-profile (`profile.sensitiveFieldNames`, opcional) o pasadas
+ * explícitamente como arg.
+ *
+ * Comportamiento:
+ *  - `tokens` opcional: cada valor se redacta literalmente (defense-in-depth).
+ *  - `extraKeys` opcional: además de `SENSITIVE_FIELD_NAMES` cerrado, se
+ *    redacta cualquier campo cuyo nombre case-insensitive matchee uno de
+ *    `extraKeys`.
+ *
+ * Si la función NO encuentra la key nueva, retorna el valor sin tocar (AC-R-22
+ * caso positivo: `app.specific.secret = "ABC"` SIN profile → no redactado).
+ * Si la key está en `extraKeys`, sí se redacta.
+ */
+export function redactWithProfile<T>(
+  value: T,
+  _profile?: unknown,
+  options?: { tokens?: readonly string[]; extraKeys?: readonly string[] },
+): T {
+  const extra = (options?.extraKeys ?? []).map((k) => k.toUpperCase());
+  const seen = new WeakSet<object>();
+  const literalPatterns: RegExp[] =
+    options?.tokens
+      ?.filter((t): t is string => typeof t === "string" && t.length > 0)
+      .map((t) => new RegExp(escapeRegex(t), "g")) ?? [];
+
+  const walk = (parentPath: string, k: string | null, v: unknown): unknown => {
+    const fullKey = k === null ? parentPath : (parentPath === "" ? k : `${parentPath}.${k}`);
+    if (v === null || v === undefined) return v;
+    if (typeof v === "string") {
+      let s = v;
+      for (const p of SENSITIVE_PATTERNS) s = s.replace(p, "[REDACTED]");
+      for (const p of literalPatterns) s = s.replace(p, "[REDACTED]");
+      return s;
+    }
+    if (typeof v !== "object") return v;
+    if (seen.has(v as object)) return "[Circular]";
+    seen.add(v as object);
+    if (Array.isArray(v)) return v.map((item, i) => walk(fullKey, String(i), item));
+    const out: Record<string, unknown> = {};
+    for (const [childK, val] of Object.entries(v as Record<string, unknown>)) {
+      const childKeyUpper = childK.toUpperCase();
+      // fullKeyUpper debe incluir el childK actual (full path = parent.child)
+      const childFullKey = fullKey === "" ? childK : `${fullKey}.${childK}`;
+      const fullKeyUpper = childFullKey.toUpperCase();
+      const isSensitive =
+        SENSITIVE_FIELD_NAMES.has(childK) ||
+        SENSITIVE_FIELD_NAMES.has(fullKeyUpper) ||
+        (extra.length === 0 && (SENSITIVE_PATTERNS.some((rx) => rx.test(childK)) || SENSITIVE_PATTERNS.some((rx) => rx.test(childFullKey)))) ||
+        extra.includes(childKeyUpper) ||
+        extra.includes(fullKeyUpper);
+      if (isSensitive) {
+        out[childK] = "[REDACTED]";
+        continue;
+      }
+      // Recurse: pasamos `childFullKey` como el `parentPath` del siguiente
+      // nivel; el `k` interno será `null` (porque estamos al inicio de la
+      // recursión sobre el nuevo objeto) y `fullKey` se calculará desde él.
+      out[childK] = walk(childFullKey, null, val);
+    }
+    return out;
+  };
+  return walk("", null, value) as T;
+}

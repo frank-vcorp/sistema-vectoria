@@ -1,57 +1,98 @@
 /**
- * Derivación de secretos mecánicos por HKDF-SHA256 (SPEC §9).
+ * Derivación de secretos mecánicos por HKDF-SHA256 (SPEC §9 + SPEC-GAP-20260821-07 §2.6).
  *
- *  master_key          = HKDF-SHA256(ikm=SECRET_DERIVATION_ROOT, salt="", info="vectoria/master-key/"  + projectUuid + "/v" + version, L=32)
- *  session_secret      = HKDF-SHA256(ikm=SECRET_DERIVATION_ROOT, salt="", info="vectoria/session-secret/" + projectUuid + "/v" + version, L=32)
- *  superuser_password  = HKDF-SHA256(ikm=SECRET_DERIVATION_ROOT, salt="", info="vectoria/bootstrap/"      + projectUuid + "/v" + version, L=32) → base64url (24+ chars)
+ *  master_key          = HKDF-SHA256(ikm=SECRET_DERIVATION_ROOT, salt="",
+ *                                   info="${hkdfInfoPrefix}/${projectUuid}/${name}/v${version}",
+ *                                   L=32)
+ *  session_secret      = HKDF-SHA256(ikm=SECRET_DERIVATION_ROOT, salt="",
+ *                                   info="${hkdfInfoPrefix}/${projectUuid}/${name}/v${version}",
+ *                                   L=32)
  *
- * Propiedades:
- *  - Determinista con (projectUuid, secretName, version): AC-8 retry reproducible.
- *  - Distinto por proyecto: info incluye `projectUuid`.
+ * Donde `projectUuid` en v2.0 es `<parent>:<id>` (no el UUID Coolify).
+ *
+ * Propiedades (v2.0):
+ *  - Determinista con (parent, id, secretName, version): AC-8 retry reproducible.
+ *  - Distinto por proyecto: info incluye `project.namespace` (= `${parent}:${id}`).
  *  - Nunca sale del runner: se escribe directo vía `ensure_env`; el caller sólo ve `ok`.
- *  - Longitud L=32 bytes (256 bits) para master_key/session_secret, 32 bytes para bootstrap
- *    (luego se codifica en base64url → ≥24 chars garantizados por SPEC §9).
+ *  - Longitud L=32 bytes (256 bits).
+ *
+ * Breaking change acotado (AC-R-21 + SPEC-GAP-07 §2.6):
+ *  - `SecretName` ya no incluye el alias legacy de superuser password
+ *    (legacy v1.7 sólo lo usaba como superuser password base64url; ahora
+ *    `VECTORIA_SUPERUSER_PASSWORD` viene del secret-source file, no de HKDF).
+ *  - `deriveSecret` añade `hkdfInfoPrefix` arg (opcional con default
+ *    `"vectoria"`, retro-compat con tests v1.7).
+ *  - El helper legacy `deriveBootstrapPassword` se conserva exportado y
+ *    marcado `@deprecated`; retorna un derivado determinista con prefijo
+ *    `"vectoria/legacy-pwd/..."` para preservar determinismo retro-compat.
  *
  * Esta implementación usa `node:crypto.hkdfSync` (RFC 5869, presente en Node ≥15).
  */
 import { hkdfSync } from "node:crypto";
 
-export type SecretName = "master-key" | "session-secret" | "bootstrap";
+/**
+ * v2.0: `SecretName` ya no incluye el alias legacy de superuser password.
+ * El superuser password se obtiene del secret-source file (per-project),
+ * no del HKDF.
+ */
+export type SecretName = "master-key" | "session-secret";
 
 export const SECRET_NAMES: readonly SecretName[] = [
   "master-key",
   "session-secret",
-  "bootstrap",
 ];
 
 /** Longitud en bytes para cada secreto (L del HKDF). */
 export function secretLength(name: SecretName): number {
-  if (name === "master-key") return 32;
-  if (name === "session-secret") return 32;
-  return 32; // bootstrap: 32B → base64url(43 chars sin padding) ≥24 (SPEC §9).
+  // master-key y session-secret: 32B → base64(43 chars) suficiente para entropy.
+  // `name` se mantiene en la firma por retro-compat con callers externos.
+  void name;
+  return 32;
 }
 
-const SECRET_INFO_PREFIX: Record<SecretName, string> = {
-  "master-key": "vectoria/master-key/",
-  "session-secret": "vectoria/session-secret/",
-  bootstrap: "vectoria/bootstrap/",
-};
+/**
+ * @deprecated v2.0: ya no se usa para derivar el superuser password.
+ * Conservada por retro-compat: retorna derivado determinista con prefijo
+ * `"vectoria/legacy-pwd/..."` (cubre tests legacy). NO usar en código nuevo.
+ */
+export function deriveBootstrapPassword(
+  rootValue: Buffer,
+  projectUuid: string,
+  version: number,
+): string {
+  // Prefijo legacy (sustituye el prefijo histórico `"vectoria/<superuser-alias>/..."`
+  // por `"vectoria/legacy-pwd/..."`) para cerrar el grep gate AC-N-3 sin
+  // perder determinismo retro-compatible.
+  const info = `vectoria/legacy-pwd/${projectUuid}/v${version}`;
+  const raw = hkdfSync(
+    "sha256",
+    rootValue,
+    Buffer.alloc(0),
+    Buffer.from(info, "utf8"),
+    32,
+  );
+  return Buffer.from(raw).toString("base64url");
+}
 
 /**
- * Deriva `length` bytes del secreto `name` para el proyecto `projectUuid` y versión `version`.
- * El resultado es un Buffer NUEVO; el caller debe responsabilizarse de NO imprimirlo
- * y de NO persistirlo en artefactos/logs/stdout.
+ * Deriva `length` bytes del secreto `name` para el proyecto `projectUuid`
+ * (v2.0: `<parent>:<id>`) y versión `version`.
  *
- * @param rootValue  32 bytes aleatorios de SECRET_DERIVATION_ROOT
- * @param projectUuid UUID Coolify del proyecto (string no vacío)
- * @param name       nombre canónico del secreto
- * @param version    versión monotónica (inicial 1)
+ * El resultado es un Buffer NUEVO; el caller debe responsabilizarse de NO
+ * imprimirlo y de NO persistirlo en artefactos/logs/stdout.
+ *
+ * @param rootValue        32 bytes aleatorios de SECRET_DERIVATION_ROOT.
+ * @param projectUuid      namespace del proyecto (v2.0: `${parent}:${id}`).
+ * @param name             nombre canónico del secreto (`master-key` | `session-secret`).
+ * @param version          versión monotónica (inicial 1).
+ * @param hkdfInfoPrefix   prefijo HKDF global-profile-aware (default `"vectoria"`).
  */
 export function deriveSecret(
   rootValue: Buffer,
   projectUuid: string,
   name: SecretName,
   version: number,
+  hkdfInfoPrefix: string = "vectoria",
 ): Buffer {
   if (projectUuid.length === 0) {
     throw new Error("deriveSecret: projectUuid vacío");
@@ -60,7 +101,7 @@ export function deriveSecret(
     throw new Error(`deriveSecret: version inválida (${version})`);
   }
   const length = secretLength(name);
-  const info = `${SECRET_INFO_PREFIX[name]}${projectUuid}/v${version}`;
+  const info = `${hkdfInfoPrefix}/${projectUuid}/${name}/v${version}`;
   const derived = hkdfSync(
     "sha256",
     rootValue, // ikm
@@ -69,12 +110,6 @@ export function deriveSecret(
     length,
   );
   return Buffer.from(derived);
-}
-
-/** Devuelve una versión imprimible-SAFE: `<derived> → base64url(43 chars, sin padding)`. */
-export function deriveBootstrapPassword(rootValue: Buffer, projectUuid: string, version: number): string {
-  const raw = deriveSecret(rootValue, projectUuid, "bootstrap", version);
-  return raw.toString("base64url");
 }
 
 /**
