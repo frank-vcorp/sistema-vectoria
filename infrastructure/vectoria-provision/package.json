@@ -12,8 +12,9 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "start": "node dist/index.js",
-    "test": "node --test --import tsx 'tests/*.test.ts' 'tests/e2e/*.test.ts'",
-    "test:lock": "node --test --import tsx tests/lock.test.ts"
+    "test": "node --test --import tsx 'tests/*.test.ts' 'tests/e2e/*.test.ts' 'tests/contract/**/*.test.ts' 'tests/preflight/*.test.ts' 'tests/runtime-adapter/*.test.ts' 'tests/ensure/*.test.ts' 'tests/push/*.test.ts'",
+    "test:lock": "node --test --import tsx tests/lock.test.ts",
+    "test:e2e:multi-project": "node --test --import tsx tests/e2e/multi-project-disposable.test.ts tests/e2e/conflict-disposable.test.ts"
   },
   "dependencies": {
     "zod": "^3.23.8"

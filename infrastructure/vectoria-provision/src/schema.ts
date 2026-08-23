@@ -142,6 +142,84 @@ export const ApplicationBlockV2Schema = ApplicationBlockSchema.extend({
 });
 export type ApplicationBlockV2 = z.infer<typeof ApplicationBlockV2Schema>;
 
+// ─── v2.1 · runtime adapter + adapter selector ──────────────────────────────
+
+/**
+ * Modo del adapter de la app.
+ *  - `"runtime"`: el adapter se provee en `runtimeAdapter.path` (OBLIGATORIO).
+ *  - `"legacy"` : compat v1 — el runner valida `secretSource.requiredKeys`
+ *                 contra el archivo de secretos. NO requiere `runtimeAdapter`.
+ *
+ * SPEC-20260822-001 v1.1 §2.3 + §6.3 (enmienda fail-closed).
+ */
+export const ApplicationAdapterSchema = z.enum(["runtime", "legacy"]);
+export type ApplicationAdapter = z.infer<typeof ApplicationAdapterSchema>;
+
+/** v2.1 · runtime adapter block (declarado por la app, no por el runner). */
+export const RuntimeAdapterBlockSchema = z.object({
+  path: z.string().min(1).max(512),
+  entry: z.string().min(1).max(120),
+  kind: z.enum(["typescript", "javascript"]),
+  version: z.string().min(1).max(32),
+});
+export type RuntimeAdapterBlock = z.infer<typeof RuntimeAdapterBlockSchema>;
+
+/** v2.1 · application extendido con adapter selector + runtimeAdapter opcional. */
+export const ApplicationBlockV21Schema = ApplicationBlockV2Schema.extend({
+  /**
+   * Modo del adapter. **OBLIGATORIO** para proyectos nuevos.
+   * SPEC-20260822-001 v1.1 §2.3 fail-closed: ausencia ⇒ exit 3.
+   */
+  adapter: ApplicationAdapterSchema.optional(),
+  /**
+   * OBLIGATORIO si `adapter==="runtime"`. PROHIBIDO si `adapter==="legacy"`
+   * (mezcla los dos modos ⇒ exit 4).
+   */
+  runtimeAdapter: RuntimeAdapterBlockSchema.optional(),
+});
+export type ApplicationBlockV21 = z.infer<typeof ApplicationBlockV21Schema>;
+
+// ─── v2.1 · preflight, deploy, migrations ───────────────────────────────────
+
+/** v2.1 · block `preflight` del manifest (overridable del global-profile). */
+export const PreflightBlockSchema = z.object({
+  skipDNS: z.boolean().default(false),
+  skipToolchain: z.boolean().default(false),
+  skipAuthScopes: z.boolean().default(false),
+  failClosedOnDrift: z.boolean().default(true),
+});
+export type PreflightBlock = z.infer<typeof PreflightBlockSchema>;
+
+/** v2.1 · block `deploy` (staging auto / production gated). */
+export const DeployBlockSchema = z.object({
+  staging: z.object({
+    auto: z.boolean().default(true),
+    gated: z.boolean().default(true),
+  }).default({}),
+  production: z.object({
+    auto: z.boolean().default(false),
+    gated: z.boolean().default(true),
+    requiresFlag: z.string().default("production-allowed"),
+  }).default({}),
+});
+export type DeployBlock = z.infer<typeof DeployBlockSchema>;
+
+/**
+ * v2.1 · migrations.
+ * - `destructive` queda como `z.literal(false)` en v2.1 (rechaza true por schema).
+ * - SPEC-20260822-001 v1.1 §3.4 + V20: cualquier otro valor ⇒ exit 3.
+ */
+export const MigrationsBlockSchema = z.object({
+  path: z.string().optional(),
+  auto: z.boolean().default(false),
+  destructive: z.literal(false, {
+    errorMap: () => ({
+      message: "migrations.destructive=true no autorizado en v2.1 (rechazado por schema)",
+    }),
+  }),
+});
+export type MigrationsBlock = z.infer<typeof MigrationsBlockSchema>;
+
 // ─── envOverrides (preprocess retrocompatible legacy → canónico) ──────────
 
 /** Mapa legacy → canónico v1.7. Declarado ANTES de ManifestSchema
@@ -203,16 +281,17 @@ export const ManifestV2StrictSchema = z
     serverUuid: z.string().min(1),
     environment: EnvNameSchema,
     resources: z.array(ResourceSchema).min(1),
-    application: ApplicationBlockV2Schema,
+    application: ApplicationBlockV21Schema,
     database: DatabaseBlockSchema,
     storage: StorageBlockSchema,
     dns: DnsBlockSchema.optional(),
     envOverrides: envOverridesSchema,
+    preflight: PreflightBlockSchema.optional(),
+    deploy: DeployBlockSchema.optional(),
+    migrations: MigrationsBlockSchema.optional(),
   })
   .superRefine((m, ctx) => {
     // Coherencia slug-fqdn: fqdn == "<slug>.<dns.zone>"
-    // Si dns.zone ausente → el runner resuelve en runtime con defaults;
-    // el schema valida sólo si dns.zone está declarado.
     if (m.dns?.zone !== undefined) {
       const expected = deriveExpectedFqdn(m.slug, m.dns.zone);
       if (m.fqdn !== expected) {
@@ -234,6 +313,24 @@ export const ManifestV2StrictSchema = z
           message: "private-github-app exige githubAppUuid+privateKeyUuid ambos null o ambos presentes",
         });
       }
+    }
+    // v2.1 fail-closed: runtimeAdapter.path OBLIGATORIO si adapter=="runtime".
+    // Nota: ausencia de `application.adapter` se evalúa en runtime
+    // (selector fail-closed, SPEC §6.3) — NO en schema, porque manifest v1
+    // importado pasa a legacy automático.
+    if (m.application.adapter === "runtime" && !m.application.runtimeAdapter) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["application", "runtimeAdapter"],
+        message: "application.adapter='runtime' requiere runtimeAdapter.{path,entry,kind,version}",
+      });
+    }
+    if (m.application.adapter === "legacy" && m.application.runtimeAdapter !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["application", "runtimeAdapter"],
+        message: "application.adapter='legacy' prohíbe runtimeAdapter (no se mezclan los dos modos)",
+      });
     }
   });
 
@@ -425,9 +522,45 @@ export const AuditEntrySchema = z.object({
   projectId: z.string().optional(),
   op: z.string().min(1),
   target: z.record(z.string(), z.unknown()).default({}),
-  result: z.enum(["created", "adopted", "failure", "rejected"]),
+  result: z.enum(["created", "adopted", "failure", "rejected", "infra_blocked"]),
   uuid: z.string().optional(),
   code: z.string().optional(),
+  // ─── v2.1 (aditivos, opcionales) ──────────────────────────────────────
+  /** Stage del pipeline: trigger | preflight | ensure_* | deploy_staging | push | reconcile. */
+  stage: z.string().optional(),
+  /** Latencia medida en ms. */
+  latencyMs: z.number().optional(),
+  /** Lista de drifts detectados (read-only). */
+  drift: z.array(z.string()).optional(),
+  /** Info de preflight (checks + readOnlyEnforced). */
+  preflight: z
+    .object({
+      adaptersDetected: z.array(z.string()).optional(),
+      checks: z.record(z.string(), z.unknown()).optional(),
+      readOnlyEnforced: z.boolean().optional(),
+    })
+    .optional(),
+  /** Runtime adapter info (v2.1, §6.3). */
+  runtimeAdapter: z
+    .object({
+      kind: z.string().optional(),
+      version: z.string().optional(),
+      fallback: z.string().optional(),
+      reason: z.string().optional(),
+      legacyKeysValidated: z.array(z.string()).optional(),
+    })
+    .optional(),
+  /** Cleanup checklist para partial mutations (v2.1 §4.3-bis, AC-12). */
+  manualCleanupChecklist: z
+    .array(
+      z.object({
+        resource: z.string(),
+        uuid: z.string(),
+        endpoint: z.string(),
+        requiredAuth: z.string(),
+      }),
+    )
+    .optional(),
 });
 export type AuditEntry = z.infer<typeof AuditEntrySchema>;
 

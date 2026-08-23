@@ -53,6 +53,32 @@ export const GlobalDefaultsSchema = z.object({
     .string()
     .regex(/^[a-zA-Z0-9_\- ./]{1,256}$/)
     .optional(),
+  // v2.1 (NUEVO) — runner config pin, trigger y preflight.
+  runner: z
+    .object({
+      version: z.string().min(1).default("2.1.0"),
+      bin: z.string().min(1).default("~/.config/kilo/vectoria-provision/bin/vectoria-provision"),
+      supportedCoolifyVersions: z.array(z.string()).default(["v4.0.0", "v4.0.0-beta.18", "v4.0.0-beta.19"]),
+      preflightRequired: z.boolean().default(true),
+      productionAllowed: z.boolean().default(false),
+    })
+    .default({}),
+  trigger: z
+    .object({
+      event: z.string().default("spec_ready_and_manifest_valid"),
+      maxConcurrency: z.number().int().min(1).max(16).default(2),
+    })
+    .default({}),
+  preflight: z
+    .object({
+      timeoutMs: z.number().int().min(1000).max(120000).default(30000),
+      failClosedOnDrift: z.boolean().default(true),
+      // v2.1: campo heredado `rollbackPartialMutations` ELIMINADO (enmienda §7.8 SOL).
+      checkDNS: z.boolean().default(true),
+      checkToolchain: z.boolean().default(true),
+      checkAuthScopes: z.boolean().default(true),
+    })
+    .default({}),
 });
 export type GlobalDefaults = z.infer<typeof GlobalDefaultsSchema>;
 
