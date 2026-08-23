@@ -278,7 +278,21 @@ test("trigger.provision: push-mode → stage='push'", async () => {
         async dnsIp() { return "212.28.185.217"; },
         async gitRemoteSha() { return "abc1234567"; },
         pnpmWorkspace() { return { exists: false }; },
-      },
+        push: {
+          ensureApplicationImpl: async () => ({
+            ok: true,
+            op: "ensure_application",
+            slug: "x-corp-test",
+            fqdn: "x-corp-test.vector-ia.mx",
+            uuid: "app-uuid-stub",
+            status: "adopted",
+            source: "adopted",
+          }),
+          patchApplication: async () => ({ ok: true, status: 200 }),
+          deployApplication: async () => ({ ok: true, status: 200, deploymentUuid: "deploy-stub" }),
+          healthcheck: async () => ({ ok: true, status: 200, latencyMs: 5 }),
+        },
+      } as never,
     });
     assert.equal(r.ok, true);
     assert.equal(r.stage, "push");

@@ -29,11 +29,25 @@
 import { readFileSync, existsSync, readFileSync as readFile } from "node:fs";
 import { resolve, join } from "node:path";
 import type { Manifest } from "../../schema.js";
-import { loadGlobalProfile, type GlobalProfile } from "../../global-profile.js";
+import {
+  loadGlobalProfile,
+  namespacedAuditPath,
+  namespacedRegistryPath,
+  namespacedSecretSourcePath,
+  type GlobalProfile,
+} from "../../global-profile.js";
 import { selectCoolifyAdapter } from "../../coollib-adapters/index.js";
 import { runPreflight, type PreflightReport } from "../preflight/index.js";
 import { parseTriggerFlags } from "./flags.js";
 import { runPushPostProvisioning } from "../push/post-provisioning.js";
+import { runEnsure as defaultRunEnsure, type RunEnsureArgs } from "../../ensure.js";
+import { snapshotConfig } from "../../schema.js";
+import { loadRegistry, withSlugLock } from "../../registry.js";
+import { loadOrganizationProfile } from "../../profile.js";
+import { ensureDestination, resolveServerUuid } from "../../destination.js";
+import { appendAudit } from "../../audit.js";
+import { ProvisionError, type EnsureResult } from "../../errors.js";
+import type { Resource } from "../../schema.js";
 
 export interface ProvisionInput {
   argv: readonly string[];
@@ -64,6 +78,14 @@ export interface ProvisionResolvers {
   gitRemoteSha(url: string, branch: string): Promise<string | undefined>;
   /** Lee pnpm-workspace.yaml del cwd del runner. */
   pnpmWorkspace(): { exists: boolean; raw?: string };
+  /**
+   * Spy seam para el pipeline `ensure_*`. Si está presente, `runProvision`
+   * la usa en lugar del `runEnsure` real (tests AC-W1 sin red).
+   * Debe respetar la firma `(args: RunEnsureArgs) => Promise<EnsureResult>`.
+   */
+  runEnsureImpl?(args: RunEnsureArgs): Promise<EnsureResult>;
+  /** Hook opcional invocado tras cada `ensure_*` exitoso (spy counter). */
+  onEnsure?(op: string, result: EnsureResult): void | Promise<void>;
 }
 
 export interface ProvisionResult {
@@ -221,21 +243,277 @@ export async function runProvision(input: ProvisionInput): Promise<ProvisionResu
     };
   }
 
-  // 6-9. ensure_* + deploy_staging + reconcile
-  // (En este pase el runner delega al runEnsure existente — el orquestador
-  //  sólo encadena y emite el audit ampliado. La integración completa
-  //  con el ensure.ts existente queda como continuación post-merge.)
+  // 6-9. ensure_* + deploy_staging + reconcile — wireup real (P3-A).
+  //
+  // Encadena `ensure_project → ensure_environment → ensure_application →
+  // ensure_database → ensure_storage → ensure_env` usando el `runEnsure`
+  // existente. Respeta:
+  //   - preflight read-only (ya PASS antes de llegar aquí);
+  //   - lock por slug (`withSlugLock`, namespace-aware);
+  //   - idempotencia: cada `ensure_*` es GET→adopt OR POST→create (vía ensure.ts);
+  //   - orden canónico: project→env→application→database→storage→env;
+  //   - cero `DELETE` automático (cleanup = Frank-auth separado).
+  //   - `manualCleanupChecklist` poblado en partial failure (AC-12, §7.8 SOL).
+  return await runEnsurePipeline({
+    manifest: preflight.manifest as Manifest,
+    preflight,
+    globalProfile,
+    env,
+    resolvers,
+  });
+}
+
+/**
+ * Ejecuta el pipeline `ensure_*` real bajo lock por slug.
+ *
+ * Diseño:
+ *  - `RunEnsureArgs` se construye una vez y se pasa al `runEnsure` por cada op.
+ *  - Spy seam: si `resolvers.runEnsureImpl` está presente, se usa en lugar del
+ *    `runEnsure` real (tests AC-W1 sin red). El hook `resolvers.onEnsure` se
+ *    invoca tras cada op exitosa (también en tests) para conteo por op.
+ *  - `created[]` / `adopted[]` se mantienen a través de las ops para construir
+ *    `adoptionBreakdown` y `manualCleanupChecklist` (partial failure).
+ *  - Audit append por op + audit append agregado al final del bloque.
+ */
+async function runEnsurePipeline(args: {
+  manifest: Manifest;
+  preflight: PreflightReport;
+  globalProfile: GlobalProfile;
+  env: NodeJS.ProcessEnv;
+  resolvers: ProvisionResolvers;
+}): Promise<ProvisionResult> {
+  const { manifest, preflight, globalProfile, env, resolvers } = args;
+  const m = manifest as unknown as Manifest & {
+    project?: { parent?: string; id?: string; namespace?: string; displayName?: string };
+    headCommit?: string;
+  };
+  const cfg = snapshotConfig(env);
+  // Paths namespaced (overridables por env; default: global-profile + project.namespace).
+  // `manifest.project` se aplica vía `v1ToV2Transform`; en runtime siempre está presente.
+  const mProject = m.project;
+  const nsParent = mProject?.parent ?? "vectoria";
+  const nsId = mProject?.id ?? m.taskId;
+  const registryPath = namespacedRegistryPath(
+    globalProfile.defaults.registryBaseDir,
+    nsParent,
+    nsId,
+  );
+  const auditPath = namespacedAuditPath(
+    globalProfile.defaults.auditBaseDir,
+    nsParent,
+    nsId,
+  );
+  cfg.PROVISION_REGISTRY_PATH = registryPath;
+  cfg.PROVISION_AUDIT_PATH = auditPath;
+  const secretSourceBaseDir = namespacedSecretSourcePath(
+    globalProfile.defaults.secretSourceBaseDir,
+    nsParent,
+    nsId,
+  ).replace(/\/[^/]+$/, "");
+
+  const registry = await loadRegistry(registryPath);
+  const profile = await loadOrganizationProfile(
+    cfg.PROVISION_PROFILE_PATH,
+    globalProfile,
+    nsParent,
+  );
+  const serverUuid = resolveServerUuid(m, registry, globalProfile);
+  const _destination = ensureDestination(m, registry, serverUuid);
+  void _destination;
+
+  const ops = ensureOpsForManifest(m);
+  const runEnsureImpl = resolvers.runEnsureImpl ?? defaultRunEnsure;
+  const created: Array<{ resource: Resource | "env"; uuid: string }> = [];
+  const adopted: Array<{ resource: Resource | "env"; uuid: string }> = [];
+  let appUuid: string | undefined;
+  let lastResult: EnsureResult | undefined;
+
+  try {
+    await withSlugLock(registryPath, m.slug, cfg.PROVISION_WAIT_LOCK_MS, async () => {
+      // Re-cargar registry bajo lock (otra invocación pudo haber mutado).
+      const lockedRegistry = await loadRegistry(registryPath);
+      const lockedServerUuid = resolveServerUuid(m, lockedRegistry, globalProfile);
+      const lockedDestination = ensureDestination(m, lockedRegistry, lockedServerUuid);
+      for (const op of ops) {
+        const r = await runEnsureImpl({
+          operation: op,
+          manifest: m,
+          destination: lockedDestination,
+          cfg,
+          registry: lockedRegistry,
+          profile,
+          globalProfile,
+          secretSourceBaseDir,
+        });
+        lastResult = r;
+        if (!r.ok) {
+          // EnsureFailure: never reaches here via real runEnsure (que tira ProvisionError);
+          // spies/tests pueden retornar EnsureFailure. Lo tratamos como partial failure.
+          throw new ProvisionError("upstream_40x", `ensure_${op} returned failure`);
+        }
+        const resource = resourceOfOp(op);
+        const entry = { resource, uuid: r.uuid ?? "<unknown>" };
+        if (r.status === "created") created.push(entry);
+        else if (r.status === "adopted") adopted.push(entry);
+        if (op === "ensure_application" && r.uuid) appUuid = r.uuid;
+        appendAudit(auditPath, {
+          ts: new Date().toISOString(),
+          taskId: m.taskId,
+          slug: m.slug,
+          projectParent: mProject?.parent,
+          projectId: mProject?.id,
+          op,
+          target: { fqdn: m.fqdn, resource },
+          result: r.status,
+          uuid: r.uuid,
+          stage: "ensure",
+          preflight: {
+            adaptersDetected: preflight.runtimeAdapter ? [preflight.runtimeAdapter.kind ?? "unknown"] : [],
+            readOnlyEnforced: preflight.readOnlyEnforced === true,
+          },
+          runtimeAdapter: preflight.runtimeAdapter
+            ? {
+                kind: preflight.runtimeAdapter.kind,
+                version: preflight.runtimeAdapter.version,
+                fallback: preflight.runtimeAdapter.fallback,
+                reason: preflight.runtimeAdapter.reason,
+                legacyKeysValidated: preflight.runtimeAdapter.legacyKeysValidated,
+              }
+            : undefined,
+        });
+        await resolvers.onEnsure?.(op, r);
+      }
+    });
+  } catch (e: unknown) {
+    if (e instanceof ProvisionError) {
+      const cleanup = created.map((c) => ({
+        resource: c.resource,
+        uuid: c.uuid,
+        endpoint: cleanupEndpointFor(c.resource, c.uuid),
+        requiredAuth: "write+deploy",
+      }));
+      appendAudit(auditPath, {
+        ts: new Date().toISOString(),
+        taskId: m.taskId,
+        slug: m.slug,
+        projectParent: mProject?.parent,
+        projectId: mProject?.id,
+        op: "ensure_pipeline",
+        target: { fqdn: m.fqdn, lastOp: lastResult?.op ?? "unknown" },
+        result: "failure",
+        code: e.code,
+        stage: "ensure",
+        preflight: { readOnlyEnforced: preflight.readOnlyEnforced === true },
+        runtimeAdapter: preflight.runtimeAdapter
+          ? {
+              kind: preflight.runtimeAdapter.kind,
+              version: preflight.runtimeAdapter.version,
+              fallback: preflight.runtimeAdapter.fallback,
+            }
+          : undefined,
+        manualCleanupChecklist: cleanup,
+      });
+      return {
+        exit: 50,
+        ok: false,
+        reason: e.code,
+        stage: "ensure",
+        preflight,
+        manifest,
+        output: {
+          adoptionBreakdown: { created: created.length, adopted: adopted.length },
+          manualCleanupChecklist: cleanup,
+          error: e.code,
+          lastOp: lastResult?.op,
+        },
+      };
+    }
+    throw e;
+  }
+
+  appendAudit(auditPath, {
+    ts: new Date().toISOString(),
+    taskId: m.taskId,
+    slug: m.slug,
+    projectParent: mProject?.parent,
+    projectId: mProject?.id,
+    op: "ensure_pipeline_complete",
+    target: { fqdn: m.fqdn },
+    result: "adopted",
+    stage: "ensure",
+    preflight: { readOnlyEnforced: preflight.readOnlyEnforced === true },
+    runtimeAdapter: preflight.runtimeAdapter
+      ? {
+          kind: preflight.runtimeAdapter.kind,
+          version: preflight.runtimeAdapter.version,
+          fallback: preflight.runtimeAdapter.fallback,
+        }
+      : undefined,
+  });
+
   return {
     exit: 0,
     ok: true,
     stage: "ensure",
     preflight,
-    manifest: preflight.manifest,
+    manifest,
     output: {
-      preflight,
-      note: "ensure_* + deploy_staging + reconcile delegados al runEnsure existente (v2.0)",
+      ensure: {
+        uuid_application: appUuid,
+        adoptionBreakdown: {
+          created: created.length,
+          adopted: adopted.length,
+        },
+      },
     },
   };
+}
+
+/**
+ * Orden canónico del pipeline `ensure_*` (SPEC-20260822-001 v1.1 §3.2).
+ *
+ *  - `ensure_project`     siempre (parent raíz).
+ *  - `ensure_environment` siempre (parent de application/database/storage).
+ *  - `ensure_application` siempre (la app es el target del push post-provisioning).
+ *  - `ensure_database`    si `manifest.resources` lo incluye (idempotente si ya existe).
+ *  - `ensure_storage`     si `manifest.resources` lo incluye.
+ *  - `ensure_env`         siempre (idempotente: re-GET → PATCH sólo lo que cambia).
+ *
+ * `ensure_env` es el último porque depende del binding de application creado.
+ */
+function ensureOpsForManifest(manifest: Manifest): string[] {
+  const ops: string[] = ["ensure_project", "ensure_environment", "ensure_application"];
+  if (manifest.resources.includes("database")) ops.push("ensure_database");
+  if (manifest.resources.includes("storage")) ops.push("ensure_storage");
+  ops.push("ensure_env");
+  return ops;
+}
+
+function resourceOfOp(op: string): Resource | "env" {
+  const r = op.replace(/^ensure_/, "");
+  if (r === "env") return "env";
+  return r as Resource;
+}
+
+function cleanupEndpointFor(resource: Resource | "env", uuid: string): string {
+  // El `manualCleanupChecklist` documenta las acciones de cleanup que el
+  // operador debe ejecutar manualmente (Frank-auth requerido). NO se ejecutan
+  // automáticamente desde el runner (V18, §7.8 SOL). El endpoint describe la
+  // operación Coolify que el operador invocaría para revertir la mutación.
+  switch (resource) {
+    case "project":
+      return `manual cleanup: project uuid=${uuid} (Coolify API remove operation, Frank-auth required)`;
+    case "environment":
+      return `manual cleanup: environment uuid=${uuid} (Coolify API remove operation, Frank-auth required)`;
+    case "application":
+      return `manual cleanup: application uuid=${uuid} (Coolify API remove operation, Frank-auth required)`;
+    case "database":
+      return `manual cleanup: database uuid=${uuid} (Coolify API remove operation, Frank-auth required)`;
+    case "storage":
+      return `manual cleanup: storage service uuid=${uuid} (Coolify API remove operation, Frank-auth required)`;
+    case "env":
+      return `manual cleanup: env via PATCH /api/v1/applications/${uuid}/envs (revert, Frank-auth required)`;
+  }
 }
 
 async function safeDbStatus(r: ProvisionResolvers): Promise<"running:healthy" | "running" | "exited:unhealthy" | "exited" | "absent"> {
