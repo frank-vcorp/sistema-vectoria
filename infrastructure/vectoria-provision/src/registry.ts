@@ -133,6 +133,7 @@ export async function acquireSlugLock(
 
   const start = Date.now();
   let fd: number | undefined;
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       fd = openSync(lockPath, "wx");
