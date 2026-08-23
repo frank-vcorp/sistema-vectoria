@@ -1,0 +1,74 @@
+{
+  "v": 2,
+  "taskId": "IMPL-20260822-XX-acme",
+  "specRef": "SPEC-20260822-001",
+  "project": {
+    "id": "portal",
+    "parent": "acme-corp",
+    "namespace": "acme-corp:portal",
+    "displayName": "Acme Corp Portal (v2.1 disposable)"
+  },
+  "slug": "acme-portal",
+  "fqdn": "acme-portal.vector-ia.mx",
+  "repository": "frank-vcorp/acme-portal",
+  "branch": "main",
+  "git": {
+    "host": "github.com"
+  },
+  "serverUuid": "03tz1uabcrjaihnvrhysbstv",
+  "environment": "staging",
+  "resources": ["project", "application", "database", "storage"],
+  "application": {
+    "appVariant": "public",
+    "buildPack": "nixpacks",
+    "portsExposes": "3000",
+    "githubAppUuid": null,
+    "privateKeyUuid": null,
+    "startCommand": "pnpm start",
+    "adapter": "runtime",
+    "runtimeAdapter": {
+      "path": "./runtime-adapter",
+      "entry": "mapping.ts",
+      "kind": "typescript",
+      "version": "1.0.0"
+    },
+    "healthcheck": {
+      "enabled": true,
+      "path": "/api/health",
+      "method": "GET",
+      "scheme": "http",
+      "port": "3000",
+      "interval": 30,
+      "timeout": 5,
+      "retries": 3
+    }
+  },
+  "database": {
+    "engine": "postgresql",
+    "name": "acme-portal-db"
+  },
+  "storage": {
+    "serviceType": "garage",
+    "name": "acme-portal-garage"
+  },
+  "dns": {
+    "zone": "vector-ia.mx",
+    "expectedIp": "212.28.185.217"
+  },
+  "envOverrides": {},
+  "preflight": {
+    "skipDNS": false,
+    "skipToolchain": false,
+    "skipAuthScopes": false,
+    "failClosedOnDrift": true
+  },
+  "deploy": {
+    "staging": { "auto": true, "gated": true },
+    "production": { "auto": false, "gated": true, "requiresFlag": "production-allowed" }
+  },
+  "migrations": {
+    "path": "./db/migrations",
+    "auto": true,
+    "destructive": false
+  }
+}

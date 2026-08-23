@@ -1,0 +1,68 @@
+{
+  "v": 2,
+  "taskId": "IMPL-20260822-XX-sistema-vectoria",
+  "specRef": "SPEC-20260822-001",
+  "project": {
+    "id": "main",
+    "parent": "vectoria",
+    "namespace": "vectoria:main",
+    "displayName": "Sistema Vectoria (v2.1 upgrade compatible)"
+  },
+  "slug": "sistema-vectoria",
+  "fqdn": "sistema-vectoria.vector-ia.mx",
+  "repository": "frank-vcorp/sistema-vectoria",
+  "branch": "main",
+  "git": {
+    "host": "github.com"
+  },
+  "serverUuid": "03tz1uabcrjaihnvrhysbstv",
+  "environment": "staging",
+  "resources": ["project", "application", "database", "storage"],
+  "application": {
+    "appVariant": "public",
+    "buildPack": "nixpacks",
+    "portsExposes": "3000",
+    "githubAppUuid": null,
+    "privateKeyUuid": null,
+    "startCommand": "pnpm start",
+    "adapter": "legacy",
+    "healthcheck": {
+      "enabled": true,
+      "path": "/api/health",
+      "method": "GET",
+      "scheme": "http",
+      "port": "3000",
+      "interval": 30,
+      "timeout": 5,
+      "retries": 3
+    }
+  },
+  "database": {
+    "engine": "postgresql",
+    "name": "sistema-vectoria-db"
+  },
+  "storage": {
+    "serviceType": "garage",
+    "name": "sistema-vectoria-garage"
+  },
+  "dns": {
+    "zone": "vector-ia.mx",
+    "expectedIp": "212.28.185.217"
+  },
+  "envOverrides": {},
+  "preflight": {
+    "skipDNS": false,
+    "skipToolchain": false,
+    "skipAuthScopes": false,
+    "failClosedOnDrift": true
+  },
+  "deploy": {
+    "staging": { "auto": true, "gated": true },
+    "production": { "auto": false, "gated": true, "requiresFlag": "production-allowed" }
+  },
+  "migrations": {
+    "path": "./db/migrations",
+    "auto": true,
+    "destructive": false
+  }
+}

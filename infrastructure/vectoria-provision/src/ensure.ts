@@ -72,6 +72,7 @@ interface RunEnsureArgs {
   globalProfile?: GlobalProfile;
   secretSourceBaseDir?: string;
 }
+export type { RunEnsureArgs };
 
 export async function runEnsure(args: RunEnsureArgs): Promise<EnsureResult> {
   switch (args.operation) {
