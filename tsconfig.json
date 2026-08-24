@@ -30,5 +30,5 @@
     "**/*.tsx",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules", ".next", "dist", "drizzle/.applied"]
+  "exclude": ["node_modules", ".next", "dist", "drizzle/.applied", "infrastructure/vectoria-provision"]
 }
