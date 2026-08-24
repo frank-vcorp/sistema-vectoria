@@ -58,7 +58,8 @@ Una vez Frank autorice el gate V3 externo, reanudar sin recomenzar SPEC-001..011
 
 ## Bloqueador actual
 
-**Gate V3 parcialmente habilitado:** Coolify staging existente está saludable en lectura (`application running:healthy`, PostgreSQL 16 `running:healthy`, Garage `running:healthy`, `/api/health` responde). El bloqueo restante es promover el working tree local (`HEAD 600a594`, cambios sin commit/push) al repositorio/ref desplegable y ejecutar migrate/bootstrap/seed/E2E; esas acciones requieren autorización explícita separada para commit/push y migración.
+**Gate V3 parcialmente habilitado:** Coolify staging existente está saludable en lectura (`application running:healthy`, PostgreSQL 16 `running:healthy`, Garage `running:healthy`, `/api/health` responde). V1 fue publicada en `origin/main` (`4d6827a`), pero Coolify mantiene el contenedor `920d7dd` pese a tres intentos de deploy (POST normal, POST force y GET documentado; el último devuelve 405). La migración V1 se aplicó manualmente y creó 61 tablas; el bootstrap base no completó porque el contenedor desplegado no contiene `drizzle/meta/_journal.json`; la siembra de Plataforma Base sí terminó. El catálogo V1 y E2E siguen bloqueados hasta ejecutar el contenedor/ref correcto.
+- **Incidente de seguridad:** el script legacy `db:seed:plataforma` imprimió en stdout un enlace de invitación de un solo uso. El valor no se repite ni se persiste en artefactos; requiere revocación/rotación operativa antes de compartir logs o continuar el onboarding.
 
 ## Trazabilidad
 

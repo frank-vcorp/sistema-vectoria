@@ -14,7 +14,7 @@
 | Criterio de cierre | V1 funcional local + gate V3 externo no autorizado → cierre local DONE (pendiente-gate-V3-externo) |
 | Estado actual | H2 resueltos: `task` operativo, `DISCOVERY-GAP-20260823-01` resuelto por `DEC-20260823-01`; SOFIA completó P-H-1 + SPEC-002..011 → `READY_FOR_VERIFYING`; GEMINI `QA-20260823-05` PASS_WITH_WARNINGS + `QA-20260823-06` revalidación PASS_WITH_WARNINGS (todos defectos QA-05 cerrados: P2-1/P3-1/P3-2/P3-3); 636/636 tests PASS; multitenancy 58/58 PASS; antipatterns 16/16 PASS; seed permissions PASS; V3 Playwright/BD/PostgreSQL/MinIO/PAC/secretos/staging bloqueados por gate externo único no autorizado |
 | WIP único | `context/CURRENT.md` |
-| Bloqueador | **Gate V3 parcialmente habilitado:** lectura real confirma app staging `running:healthy`, PostgreSQL 16 `running:healthy`, Garage `running:healthy` y `/api/health` operativo. El código desplegado es `git_commit_sha=920d7dd`, mientras el working tree V1 permanece local en `HEAD=600a594` sin commit/push; migrate/bootstrap/seed/E2E requieren promoción explícita y autorización separada para commit/push/migración. |
+| Bloqueador | **Gate V3 parcialmente habilitado:** app/DB/Garage staging saludables y `/api/health` operativo. V1 publicada hasta `4d6827a`, pero el contenedor continúa en `920d7dd` tras tres intentos de deploy; migración V1 aplicada (61 tablas), seed de Plataforma Base PASS, bootstrap incompleto por ausencia de `drizzle/meta/_journal.json` en el contenedor, catálogo V1/E2E pendientes. Incidente: seed legacy imprimió un enlace de invitación de un solo uso; no se repite ni se persiste, requiere revocación/rotación antes de onboarding. |
 
 ### Entregas del turno
 
