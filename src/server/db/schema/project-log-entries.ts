@@ -15,6 +15,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations";
 import { users } from "./users";
+// SPEC-005: FK a `projects`. Forward reference declarada vía callback
+// para evitar ciclo duro entre `projects` ↔ `project_log_entries` (los
+// proyectos referencian `users` y `organizations` directamente; las
+// entradas de bitácora referencian `projects`). Drizzle resuelve la
+// referencia en tiempo de generación de la migración.
+import { projects } from "./projects";
 
 export const projectLogEntries = pgTable(
   "project_log_entries",
@@ -23,7 +29,7 @@ export const projectLogEntries = pgTable(
       .notNull()
       .references(() => organizations.id),
     id: uuid("id").notNull().defaultRandom(),
-    projectId: uuid("project_id").notNull(), // FK añadida en SPEC-005.
+    projectId: uuid("project_id").notNull(),
     entryType: text("entry_type").notNull(),
     body: text("body").notNull(),
     private: boolean("private").notNull().default(false),
@@ -37,6 +43,11 @@ export const projectLogEntries = pgTable(
       t.projectId,
       t.createdAt,
     ),
+    projectFk: foreignKey({
+      name: "project_log_entries_project_fk",
+      columns: [t.organizationId, t.projectId],
+      foreignColumns: [projects.organizationId, projects.id],
+    }),
     createdByFk: foreignKey({
       name: "project_log_entries_created_by_fk",
       columns: [t.organizationId, t.createdBy],

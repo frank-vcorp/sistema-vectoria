@@ -101,6 +101,11 @@
 - **Decisión:** un usuario puede recibir permisos EXTRA individuales (aditivos) otorgados por Director.
 - **Estado:** confirmed (decisión #23, BR-N131).
 
+## DEC-20260823-01 · Medios de contacto de prospectos
+- **Decisión:** el enum `prospects.medium` admite únicamente estos tres valores, en este orden y con estos identificadores estables: `llamada` (Llamada), `email` (Email), `whatsapp` (WhatsApp).
+- **Estado:** confirmed (Frank, 2026-08-23).
+- **Supersedes:** DEC-FUN-20260814-19 en cuanto al cardinal “14”; se conserva la decisión histórica y se mantiene el vocabulario explícitamente confirmado.
+
 ## DEC-FUN-20260817-23 · Regla de oro: el vendedor NO hace spec con IA
 - **Decisión:** vendedor solo llena cuestionario. Spec lo genera el sistema. La IA externa no participa en crear el spec.
 - **Estado:** confirmed (ratificada 17-ago).
@@ -320,8 +325,163 @@
 
 ---
 
-## Resumen de decisiones (al 2026-08-17)
+## DEC-FUN-20260818-61 · Módulo propio de Suscripciones
+- **Pregunta:** ¿las suscripciones se visualizan sólo indirectamente desde Facturación y Cobranza, o requieren una vista funcional propia?
+- **Decisión:** incorporar **Suscripciones** como octavo módulo operativo, separado de Facturación y Cobranza, con un panel propio para visualizar la cartera de servicios recurrentes.
+- **Alcance confirmado:** el panel identifica al menos las suscripciones **anuales, semestrales y trimestrales** y permite consultar la información relacionada de facturación y cobranza.
+- **Límite funcional:** Suscripciones no emite CFDI ni registra cobros; Facturación y Cobranza mantienen esas responsabilidades.
+- **Estado:** confirmed (Frank, 2026-08-18).
+- **Impacto:** amplía el alcance funcional y requiere que INTEGRA planifique una SPEC técnica propia o una extensión explícita de Facturación/Cobranza. Ver BR-N399 y FND-20260818-03.
+- **Evolución:** DEC-FUN-20260818-62 amplía los ciclos a mensual/trimestral/semestral/anual y confirma gestión completa.
 
-- **60 decisiones** ratificadas en discovery (52 previas + 8 decisiones de cierre funcional DEC-FUN-20260817-53 a -60).
+---
+
+## DEC-FUN-20260818-62 · Periodicidades y gestión completa de Suscripciones
+- **Pregunta:** ¿qué ciclos muestra el panel de Suscripciones y si el MVP sólo consulta o también gestiona su ciclo de vida?
+- **Decisión:** el panel muestra suscripciones **mensuales, trimestrales, semestrales y anuales**. El MVP permite **gestión completa**: renovación, pausa, cancelación y reactivación, además de consulta de cartera. La reactivación quedó precisada en DEC-FUN-20260818-65.
+- **Razón:** Frank necesita visualizar toda la información recurrente y operar sus ciclos sin depender de pantallas dispersas de Facturación/Cobranza.
+- **Estado:** confirmed (Frank, 2026-08-18).
+- **Impacto:** amplía BR-N399 con ciclos confirmados y crea BR-N400/BR-N401. INTEGRA debe producir una SPEC de Suscripciones con ciclo de vida completo, una vez se defina quién está autorizado y sus estados funcionales.
+- **Pendiente no bloqueante para otros módulos:** actor autorizado y máquina de estados de Suscripciones (Q-20260818-03).
+
+---
+
+## DEC-FUN-20260818-63 · Permiso configurable para gestionar Suscripciones
+- **Pregunta:** ¿qué rol puede renovar, pausar y cancelar una suscripción?
+- **Decisión:** la autoridad no queda ligada a un rol fijo. El Director asigna mediante permisos configurables quién puede gestionar Suscripciones.
+- **Razón:** respeta el principio de roles y permisos como datos, combinables y no hardcoded.
+- **Estado:** confirmed (Frank, 2026-08-18).
+- **Impacto:** se crea BR-N402 y el permiso funcional `gestionar_suscripciones`. Las acciones críticas se auditan y sólo usuarios con ese permiso pueden ejecutarlas.
+
+## DEC-FUN-20260818-64 · Estados funcionales de Suscripciones
+- **Pregunta:** ¿qué estados representan el ciclo de vida de una suscripción?
+- **Decisión:** una suscripción puede estar **activa, pausada, cancelada o vencida**.
+- **Estado:** confirmed (Frank, 2026-08-18).
+- **Impacto:** se crea BR-N403. Las transiciones entre estados, en especial el efecto de renovar una suscripción vencida o cancelada, se cierran en Q-20260818-04 antes de la SPEC de Suscripciones.
+
+---
+
+## DEC-FUN-20260818-65 · Reactivación de Suscripciones canceladas
+- **Pregunta:** ¿una suscripción cancelada es final o se puede reactivar cuando el cliente regresa?
+- **Decisión:** una suscripción cancelada puede volver a estar activa mediante renovación o reactivación, conservando su historial.
+- **Ciclo confirmado:** `activa ↔ pausada`; `activa → vencida` al terminar el periodo sin renovar; `vencida → activa` al renovar; `activa | pausada → cancelada`; `cancelada → activa` al reactivar o renovar.
+- **Estado:** confirmed (Frank, 2026-08-18).
+- **Impacto:** se crea BR-N404. El ciclo queda cerrado, pero el delta de Suscripciones queda `conditionally_ready` hasta resolver la relación renovación→Facturación (Q-20260818-06).
+
+---
+
+## DEC-FUN-20260818-66 · Creación automática de Suscripciones desde la OS
+- **Pregunta:** ¿una Suscripción es una entidad propia y qué evento la crea?
+- **Decisión:** una Suscripción es una entidad funcional propia. El sistema la crea automáticamente cuando se autoriza una OS cuyo tipo de cobro es `suscripción`.
+- **Razón:** preserva trazabilidad desde lo vendido y evita altas aisladas o una proyección incompleta desde Facturación/Cobranza.
+- **Estado:** confirmed (Frank, 2026-08-18).
+- **Impacto:** se crea BR-N405; la futura SPEC de Suscripciones depende de Comercial y OS además de Plataforma, Clientes, Facturación y Cobranza. La relación renovación→factura queda pendiente en Q-20260818-06.
+
+---
+
+## DEC-FUN-20260818-67 · Renovación crea factura borrador
+- **Pregunta:** al renovar una Suscripción, ¿qué debe ocurrir con la factura del nuevo periodo?
+- **Decisión:** renovar crea automáticamente una factura en estado borrador para el nuevo periodo. Facturación conserva la revisión, timbrado y emisión final.
+- **Razón:** automatiza la continuidad comercial sin permitir que Suscripciones emita CFDI por sí misma.
+- **Estado:** confirmed (Frank, 2026-08-18).
+- **Impacto:** se crea BR-N406; cierra la relación Suscripciones→Facturación y deja el delta `ready_for_integra`.
+
+---
+
+## DEC-FUN-20260818-68 · Toda oferta vendida requiere Proyecto
+- **Pregunta:** ¿todo producto/servicio vendido crea Proyecto, o cada oferta configurable decide si lo requiere?
+- **Decisión:** toda oferta vendida crea Proyecto. Todo lo que Vector IA vende requiere intervención de un técnico especialista, aunque sea para configuración, activación, ajuste o mantenimiento.
+- **Razón:** no existen productos o servicios puramente pasivos dentro del modelo operativo; cada venta requiere trabajo técnico rastreable.
+- **Estado:** confirmed (Frank, 2026-08-18).
+- **Impacto:** confirma BR-N03 como regla universal y crea BR-N407. El workflow OS autorizada → Proyecto aplica también a productos y servicios recurrentes; si además la OS es de tipo `suscripción`, crea en paralelo la entidad Suscripción de BR-N405.
+
+---
+
+## DEC-FUN-20260819-69 · Protección y personalización de roles base
+- **Pregunta:** ¿cómo se administran el label, los permisos y la desactivación de roles base (seed)?
+- **Decisión:** el Director puede editar el label visible de un rol base, sin cambiar su código. Los permisos de los roles base son inmutables; las variaciones se cubren con roles personalizados. Un rol base con usuarios asignados no se puede desactivar hasta que esos usuarios sean reasignados.
+- **Razón:** permite personalizar la presentación sin alterar la identidad ni las garantías funcionales de visibilidad; también evita dejar usuarios sin un rol operativo.
+- **Estado:** confirmed (Frank, 2026-08-19; resolución de Q-20260818-01, opciones A1/B1/C1).
+- **Impacto:** crea BR-N408 a BR-N410, resuelve el DISCOVERY-GAP-20260818-01 y permite a INTEGRA cerrar los AC-69/AC-70 de SPEC-20260817-001.
+
+---
+
+## DEC-FUN-20260819-70 · Dirección visual de la interfaz interna
+- **Pregunta:** ¿qué sistema y referencia visual debe guiar la interfaz interna de V1?
+- **Decisión:** V1 adopta Tailwind CSS con shadcn/ui como sistema de interfaz. La referencia visual es el tema `olive_instrument` del kit Oatmeal de Tailwind Plus: tonos oliva y neutros cálidos, tipografía editorial y composición sobria. Es una referencia de dirección visual, no una instrucción para copiar código, assets ni layout del kit.
+- **Razón:** brinda una interfaz interna profesional y diferenciada manteniendo componentes accesibles y consistentes para el MVP.
+- **Estado:** confirmed (Frank, 2026-08-19).
+- **Impacto:** INTEGRA debe formalizar el contrato técnico de UI y sus tokens; la interfaz debe conservar todos los requisitos funcionales vigentes de permisos, privacidad, dashboards, formularios y accesibilidad.
+
+---
+
+## DEC-FUN-20260819-71 · Tema claro y oscuro alineado a la marca VectorIA
+- **Pregunta:** ¿cómo debe aplicarse la referencia Oatmeal frente a la identidad de marca propia de VectorIA?
+- **Decisión:** la interfaz usa Tailwind CSS con shadcn/ui, pero sustituye la paleta oliva de la referencia por la marca VectorIA. El tema claro predeterminado tiene fondo blanco y alto espacio negativo; el tema oscuro usa navy profundo. El naranja quemado es el acento de acción en ambos temas. La tipografía es sans-serif moderna, no editorial serif. Los logos y activos de `context/VectorIA-Brand-Assets/` son la fuente visual canónica.
+- **Razón:** se conserva la sobriedad y composición de la referencia sin diluir la identidad corporativa de VectorIA.
+- **Estado:** confirmed (Frank, 2026-08-19).
+- **Reemplaza:** DEC-FUN-20260819-70 sólo en paleta y tipografía. Se conserva Tailwind CSS + shadcn/ui y la referencia como inspiración de composición, nunca como fuente para copiar código, assets o layout.
+- **Impacto:** INTEGRA debe definir tokens claro/oscuro con `#FFFFFF`, `#0A1F44`, `#D35400` y `#2C3E50`, incorporar los activos de marca bajo licencia disponible y no iniciar construcción hasta que el contrato visual quede formalizado.
+
+---
+
+## DEC-FUN-20260819-72 · Paridad operativa en móvil, tableta y escritorio
+- **Pregunta:** ¿qué operaciones están disponibles según el dispositivo?
+- **Decisión:** todas las pantallas y acciones de V1 deben ser plenamente operables en móvil, tableta y escritorio. La presentación se adapta al dispositivo, sin degradar una acción de negocio a consulta o bloquearla por tamaño de pantalla.
+- **Razón:** la operación puede requerir continuidad fuera del escritorio; la experiencia adaptable no debe alterar las capacidades autorizadas de cada actor.
+- **Estado:** confirmed (Frank, 2026-08-19).
+- **Impacto:** la futura ADR de UI y las SPECs deben definir componentes, tablas, formularios, constructores, drag & drop y validaciones con comportamiento usable y verificable en los tres formatos; los escenarios E2E deben cubrir los viewports correspondientes.
+
+---
+
+## DEC-FUN-20260819-73 · Advertencia por desviación contra presupuesto declarado
+- **Pregunta:** ¿qué debe hacer el sistema si una cotización excede 1.5 veces el presupuesto declarado durante el cuestionario?
+- **Decisión:** el sistema muestra una advertencia clara con el presupuesto declarado y el total de la cotización, pero no bloquea el flujo ni exige una aprobación adicional.
+- **Razón:** ofrece visibilidad comercial sin detener oportunidades legítimas cuyo alcance creció durante el descubrimiento.
+- **Estado:** confirmed (Frank, 2026-08-19; resolución de Q-NB-3 / DISCOVERY-GAP-20260819-01).
+- **Impacto:** crea BR-N411 y habilita el criterio presupuestal de SPEC-003.
+
+---
+
+## DEC-FUN-20260820-74 · SuperUser persistente para bootstrap
+- **Pregunta:** ¿cómo se registra el emisor de la primera invitación cuando todavía no existe un usuario humano?
+- **Decisión:** el sistema crea y conserva un usuario técnico `SuperUser` con correo `contacto@vector-ia.mx`. Ese actor emite la primera invitación y permite mantener trazabilidad de creación. Su contraseña inicial se provisionará posteriormente como secreto, no queda documentada ni se expone en artefactos funcionales.
+- **Razón:** conservar trazabilidad explícita del bootstrap sin utilizar un UUID ficticio ni un emisor vacío.
+- **Estado:** confirmed (Frank, 2026-08-20; resolución de DISCOVERY-GAP-20260820-01, GAP 1).
+- **Impacto:** crea BR-N412; INTEGRA debe actualizar Plataforma Base y bootstrap para crear el actor persistente antes de la primera invitación. La provisión segura de contraseña es una dependencia operativa, no una decisión funcional pendiente.
+
+---
+
+## DEC-FUN-20260820-75 · Permisos sembrados por su módulo
+- **Pregunta:** ¿cuándo se declaran y se siembran los permisos de cada módulo operativo?
+- **Decisión:** Plataforma Base siembra sólo permisos propios. Cada SPEC de módulo declara y siembra sus permisos cuando se implementa; por ejemplo, `registrar_tiempo` llega con Proyectos/ejecución.
+- **Razón:** conserva la frontera de responsabilidad por módulo y evita que Plataforma Base preconfigure permisos de capacidades aún no implementadas.
+- **Estado:** confirmed (Frank, 2026-08-20; resolución de DISCOVERY-GAP-20260820-01, GAP 2).
+- **Impacto:** crea BR-N413; INTEGRA actualiza la semilla de Plataforma Base y el contrato de SPECs posteriores.
+
+---
+
+## Resumen de decisiones (al 2026-08-20)
+
+- **75 decisiones** ratificadas en discovery (52 previas + 8 decisiones de cierre funcional DEC-FUN-20260817-53 a -60 + DEC-FUN-20260818-61 a -68 de Suscripciones + DEC-FUN-20260819-69/-73 + DEC-FUN-20260820-74/-75).
 - Las decisiones 53-60 cierran los huecos de Proyectos detectados en la auditoría del 17-ago.
-- Estado del discovery: `ready_for_integra` sin preguntas funcionales bloqueantes.
+- Suscripciones y la frontera Productos/Servicios quedan `ready_for_integra`: toda oferta crea Proyecto; inclusión, ciclos, gestión completa, autoridad configurable, estados, transiciones, origen y factura borrador de renovación están confirmados.
+
+---
+
+## DEC-FUN-20260820-76 · Provisionamiento global zero-touch
+- **Decisión:** todo software desplegable construido por Vectoria activa automáticamente el provisionamiento estándar, sin intención adicional ni intervención operativa de Frank. Precedencia: override explícito de Frank; infraestructura existente del proyecto; Coolify/Contabo Vectoria por defecto.
+- **Estado:** confirmed (Frank, 2026-08-20; SOL-20260820-10/11).
+- **Impacto:** exige ADR/SPEC global; no autoriza implementación en este turno.
+
+## DEC-FUN-20260820-77 · Perfil y límites del provisionamiento
+- **Decisión:** el flujo resuelve secretos mecánicos, credencial bootstrap temporal, UUIDs, DNS, variables y sólo los recursos exigidos por la SPEC, reutilizando infraestructura existente. Deploy a producción, delete, billing y migraciones irreversibles requieren autorización separada vigente.
+- **Estado:** confirmed (Frank, 2026-08-20; SOL-20260820-09/10/11).
+- **Impacto:** el perfil organizacional global aporta Director/email/org; overrides explícitos prevalecen; INTEGRA debe definir broker, capacidades y registry.
+
+## DEC-FUN-20260822-78 · Coolify/Contabo como destino global por defecto
+- **Pregunta:** ¿dónde deben levantarse los proyectos futuros construidos por Vectoria?
+- **Decisión:** todo proyecto nuevo desplegable de Vectoria se provisiona por defecto en el servidor Coolify/Contabo propio existente. No se crea infraestructura alternativa por proyecto.
+- **Excepción:** sólo un override explícito de Frank puede seleccionar otro destino o impedir la provisión.
+- **Estado:** confirmed (Frank, 2026-08-22).
+- **Impacto:** el contrato global debe incluir un trigger automático por manifest, preflight de versión/API/health, perfil organizacional, secret-source, adaptadores runtime y pruebas E2E multi-proyecto antes de considerar listo el sistema reusable.

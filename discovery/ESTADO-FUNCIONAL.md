@@ -1,8 +1,8 @@
 # ESTADO-FUNCIONAL · Vector IA
 
-**Versión:** 2026-08-17 23:20
-**Fuente vigente:** `discovery/FUNCTIONAL-BASELINE.md` v1.0
-**Estado general:** `ready_for_integra`
+**Versión:** 2026-08-18 10:26
+**Fuente vigente:** `discovery/FUNCTIONAL-BASELINE.md` v1.5
+**Estado general:** `ready_for_integra`; toda oferta vendida requiere Proyecto y Suscripciones está cerrada funcionalmente.
 
 ---
 
@@ -14,8 +14,8 @@
 | Problema y resultado esperados | ✅ | Baseline §1 |
 | Alcance incluido y excluido | ✅ | Baseline §2 |
 | Actores y permisos | ✅ | `ACTORES-Y-PERMISOS.md` |
-| Decisiones críticas con ID | ✅ | 60 decisiones confirmadas |
-| Reglas críticas con ID | ✅ | 231 reglas confirmadas y únicas |
+| Decisiones críticas con ID | ✅ | 68 decisiones confirmadas |
+| Reglas críticas con ID | ✅ | 240 reglas confirmadas y únicas |
 | Flujos y handoffs | ✅ | `FLUJOS-FUNCIONALES.md` |
 | Escenarios representativos | ✅ | `SIMULACION-FLUJO-PROYECTOS-20260817.md` |
 | Preguntas bloqueantes | ✅ | Ninguna |
@@ -33,9 +33,10 @@
 | Cuestionarios, catálogo y plantillas | READY | Selección explícita de plantilla resuelta |
 | Comercial y cotización | READY | Multi-línea, aceptación y descuentos definidos |
 | Orden de Servicio | READY | Autorización, entrega y cierre separados |
-| Proyectos | READY | Autoridad de artefactos, estados, permisos, handoffs y excepciones cerrados |
+| Proyectos | READY | Autoridad de artefactos, estados, permisos, handoffs y excepciones cerrados; toda oferta vendida requiere Proyecto por intervención técnica especialista (DEC-FUN-20260818-68) |
 | Facturación | READY | FacturoPorTi confirmado |
 | Cobranza y comisiones | READY | Comisión sobre facturado y flujo de cobro definidos |
+| Suscripciones | READY | Panel propio, ciclos mensual/trimestral/semestral/anual, gestión completa, permiso configurable, estados, transiciones, origen desde OS y factura borrador por renovación confirmados |
 | Finanzas | READY_WITH_DETAIL_GAPS | Reglas principales cerradas; INTEGRA puede dividir SPECs por capacidad |
 | Dashboard y Administración | READY_WITH_DETAIL_GAPS | Comportamiento general cerrado; detalle de pantallas no es bloqueante para contratos base |
 

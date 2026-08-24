@@ -19,6 +19,8 @@
 
 Un usuario puede tener hasta 5 roles simultáneamente.
 
+El Director puede cambiar el label visible de un rol base, pero no su código. Los permisos de los roles base son inmutables; para variaciones, el Director crea roles adicionales. No se puede desactivar un rol base que conserve usuarios asignados: primero deben reasignarse.
+
 ---
 
 ## 2. Permisos de ejemplo (no exhaustivo)
@@ -27,6 +29,7 @@ Un usuario puede tener hasta 5 roles simultáneamente.
 |---|---|
 | `ver_costos` | Ver costos internos (mano de obra, directos, totales) |
 | `gestionar_facturas` | Crear, timbrar, cancelar facturas |
+| `gestionar_suscripciones` | Renovar, pausar, cancelar y reactivar suscripciones |
 | `aprobar_cambios` | Autorizar cambios de alcance |
 | `gestionar_proyectos` | Crear y liderar proyectos |
 | `asignar_tareas` | Asignar tareas a técnicos |
@@ -95,11 +98,15 @@ Un usuario puede tener hasta 5 roles simultáneamente.
 | Aprobar excepción de cierre | Director | motivo, evidencia y auditoría obligatorios |
 | Cerrar OS (administrativo) | Administrador | requiere proyecto terminado/cancelado, factura final aplicable emitida y saldo total cero, salvo excepción del Director |
 | Facturar (timbrar CFDI) | Administrador | vía FacturoPorTi (decisión ratificada) |
+| Gestionar Suscripción | Usuario con `gestionar_suscripciones` | Renovar, pausar, cancelar o reactivar; acción auditada (DEC-FUN-20260818-63/-65) |
 | Registrar cobro | Administrador | con comprobante y aplicación a factura(s) |
 | Calcular comisión estimada | Sistema | al aceptar cotización si rate > 0 |
 | Liberar comisión | Sistema | BR-N33 v2 sobre facturado |
 | Pagar comisión | Director / Administrador | día 15 por default; BR-N123 reversa si factura se cancela |
 | Crear roles custom | Director | BR-N128; roles seed no se eliminan (BR-N127) |
+| Editar label de rol base | Director | Sólo label; el código permanece inmutable (BR-N408) |
+| Cambiar permisos de rol base | No permitido | Las variaciones requieren un rol custom (BR-N409) |
+| Desactivar rol base con usuarios | No permitido | Reasignación previa obligatoria (BR-N410) |
 | Otorgar permiso custom | Director | BR-N131; aditivo, registrado en audit_log |
 
 ---

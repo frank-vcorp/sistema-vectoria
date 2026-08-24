@@ -10,9 +10,22 @@ import { messages } from "@/shared/utils";
 
 const links = [
   { href: "/", label: messages.nav.dashboard },
+  { href: "/prospectos", label: messages.nav.prospectos },
+  { href: "/clientes", label: messages.nav.clientes },
+  { href: "/comercial", label: messages.nav.comercial },
+  { href: "/ordenes-servicio", label: messages.nav.ordenesServicio },
+  { href: "/proyectos", label: messages.nav.proyectos },
+  { href: "/facturacion", label: messages.nav.facturacion },
+  { href: "/cobranza", label: messages.nav.cobranza },
+  { href: "/finanzas", label: messages.nav.finanzas },
+  { href: "/dashboard", label: messages.nav.dashboard },
+  { href: "/admin", label: messages.nav.admin },
+  { href: "/bitacora", label: messages.nav.bitacora },
   { href: "/admin/roles", label: messages.nav.roles },
   { href: "/admin/permissions", label: messages.nav.users },
   { href: "/admin/fiscal-config", label: messages.nav.fiscalConfig },
+  { href: "/admin/questionnaires", label: messages.nav.questionnaireEditor },
+  { href: "/suscripciones", label: messages.nav.suscripciones },
   { href: "/notifications", label: messages.nav.notifications },
   { href: "/audit", label: messages.nav.audit },
 ] as const;

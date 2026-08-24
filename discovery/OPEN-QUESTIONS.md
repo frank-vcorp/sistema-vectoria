@@ -1,8 +1,15 @@
 # OPEN-QUESTIONS · Vector IA
 
 **Versión:** 2026-08-17 23:20
-**Estado:** sin pendientes operativos propios de Vector IA registrados en discovery.
+**Estado:** el gap funcional de SPEC-002 quedó resuelto por `DEC-20260823-01`.
 
 Los elementos sobre buckets, CCTs SEP, RLS, URLs y archivos sin commit fueron retirados porque pertenecen a otro sistema y contaminaban el contexto de Vector IA. Permanecen recuperables en el historial de Git, pero no se entregan a INTEGRA.
 
 Las decisiones funcionales abiertas viven exclusivamente en `PREGUNTAS-ABIERTAS.md`. Actualmente sólo existe Q-NB-3 como política comercial diferida y no bloqueante.
+
+## DISCOVERY-GAP-20260823-01 · Enum de medios de contacto de SPEC-002
+
+- **Estado:** `resolved` (2026-08-23); bloqueaba SPEC-002 y no afectaba SPEC-001.
+- **Hallazgo relacionado:** `FND-20260823-01`.
+- **Pregunta exacta:** ¿Cuál es la lista canónica, ordenada y con identificadores estables de los valores del enum `prospects.medium`?
+- **Resolución:** Frank confirmó sólo tres valores, en orden: `llamada` (Llamada), `email` (Email), `whatsapp` (WhatsApp).

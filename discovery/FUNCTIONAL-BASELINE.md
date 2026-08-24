@@ -1,10 +1,10 @@
 # Vector IA · Discovery funcional consolidado
 
-**Versión:** v1.0
-**Fecha:** 2026-08-17 23:20
-**Estado:** `ready_for_integra`
+**Versión:** v1.12
+**Fecha:** 2026-08-20
+**Estado:** `ready_for_integra`; el delta de Suscripciones, la frontera Productos/Servicios y la política de roles base están cerrados funcionalmente.
 **Naturaleza:** fuente funcional vigente. No es arquitectura ni especificación técnica.
-**Fuentes incorporadas:** sesiones del 14 y 17 de agosto, reconstrucción de reglas, auditoría funcional y cierre de Proyectos DEC-FUN-53 a DEC-FUN-60.
+**Fuentes incorporadas:** sesiones del 14 y 17 de agosto, reconstrucción de reglas, auditoría funcional, cierre de Proyectos DEC-FUN-53 a DEC-FUN-60 y delta de Suscripciones DEC-FUN-20260818-61 a -68.
 
 ---
 
@@ -59,7 +59,11 @@ Roles base combinables:
 6. Diseñador UX/UI.
 7. QA/Tester.
 
-Un usuario puede tener hasta cinco roles. Roles, permisos, relación rol-permiso, asignaciones y permisos individuales son datos configurables. Las acciones se autorizan por permiso, no por comparaciones rígidas del nombre del rol.
+Un usuario puede tener hasta cinco roles. Roles, permisos, relación rol-permiso, asignaciones y permisos individuales son datos configurables. Las acciones se autorizan por permiso, no por comparaciones rígidas del nombre del rol. En los roles base, el Director puede editar el label visible sin alterar el código; sus permisos son inmutables y las variaciones requieren roles adicionales. Un rol base con usuarios asignados debe reasignarlos antes de desactivarse.
+
+La interfaz interna usa un sistema consistente de componentes accesibles con Tailwind CSS y shadcn/ui. Toma de Oatmeal sólo la sobriedad de composición; la identidad visual es VectorIA: fondo blanco y espacio negativo en tema claro, navy profundo en tema oscuro, naranja quemado como acento de acción y tipografía sans-serif moderna. Los activos canónicos viven en `context/VectorIA-Brand-Assets/`. Todas las pantallas y acciones de V1 son plenamente operables en móvil, tableta y escritorio; su presentación se adapta al viewport sin reducir las capacidades autorizadas. Esta dirección no modifica los permisos, la privacidad ni los flujos funcionales.
+
+El bootstrap conserva trazabilidad con el usuario técnico persistente SuperUser (`contacto@vector-ia.mx`), creado antes de emitir la primera invitación. La contraseña inicial se provisiona posteriormente como secreto. Plataforma Base siembra exclusivamente sus propios permisos; cada módulo incorpora sus permisos al implementarse.
 
 Principales responsabilidades:
 
@@ -77,7 +81,7 @@ La matriz completa vive en `discovery/ACTORES-Y-PERMISOS.md`.
 
 ## 4. Áreas funcionales
 
-### 4.1 Siete módulos operativos
+### 4.1 Ocho módulos operativos
 
 1. Autenticación y Usuarios.
 2. Clientes.
@@ -86,13 +90,14 @@ La matriz completa vive en `discovery/ACTORES-Y-PERMISOS.md`.
 5. Facturación.
 6. Cobranza.
 7. Finanzas.
+8. Suscripciones.
 
 ### 4.2 Áreas transversales
 
 - **Hoy/Dashboard:** widgets configurables por rol; “Esta semana” por defecto y filtro “Hoy”.
 - **Administración:** roles, permisos, catálogos, plantillas, cuestionarios y configuración.
 
-Cobranza es un módulo separado de Comercial. Cuestionarios, plantillas y catálogo viven dentro de Administración.
+Cobranza es un módulo separado de Comercial. **Suscripciones** es un módulo separado de Facturación y Cobranza: consume su información, pero aporta una visión propia de cartera, periodicidad y vigencia. Cuestionarios, plantillas y catálogo viven dentro de Administración.
 
 ---
 
@@ -135,6 +140,8 @@ El catálogo contiene productos y servicios configurables. Existen nueve plantil
 
 Para Sistema Web, el cuestionario solicita explícitamente `web_landing`, `web_sitio`, `web_app` o `web_saas`. El sistema puede advertir inconsistencias, pero el PL confirma la plantilla antes de firmar el alcance. DEC-FUN-53.
 
+**Toda oferta vendida requiere Proyecto**, incluso un producto o servicio recurrente. La intervención de un técnico especialista (por configuración, activación, ajuste, mantenimiento u otra actividad) es obligatoria; por tanto, toda OS autorizada conserva el workflow de creación de Proyecto.
+
 ### 5.3 Alcance funcional firmado
 
 Flujo: `draft → in_review → signed`.
@@ -155,6 +162,7 @@ Una vez `signed` es inmutable. Los cambios posteriores usan change request. Este
 - Puede tener versiones; sólo una se acepta.
 - Descuento: hasta 10% libre, 10-25% con Director, más de 25% bloqueado.
 - La aceptación exige identidad, fecha, medio y evidencia.
+- Si la cotización excede 1.5 veces el presupuesto declarado, el sistema muestra una advertencia sin bloquear el flujo.
 - Una cotización aceptada genera una OS y una OS genera un proyecto en el MVP.
 - Tipos de cobro: pago único, mensualidades o suscripción.
 - Una suscripción requiere pago inicial antes de autorizar el proyecto.
@@ -287,12 +295,32 @@ La comisión se libera sobre facturado, no sobre cobrado:
 
 Cancelar una factura reversa la proporción correspondiente.
 
+### 7.4 Suscripciones
+
+El módulo de Suscripciones ofrece un panel propio para visualizar la cartera de servicios recurrentes, sin obligar al usuario a reconstruirla desde Facturación o Cobranza.
+
+Una Suscripción es una entidad funcional propia. El sistema la crea automáticamente al autorizar una Orden de Servicio cuyo tipo de cobro es `suscripción`, conservando la relación con cliente, cotización y OS de origen.
+
+Cada suscripción debe identificarse por una de estas periodicidades: **mensual, trimestral, semestral o anual**. El panel permite reconocer qué suscripciones pertenecen a cada periodicidad y consultar su información relacionada de facturación y cobranza.
+
+Suscripciones no reemplaza Facturación ni Cobranza:
+
+- **Facturación** conserva la emisión y el timbrado de los CFDI correspondientes.
+- **Cobranza** conserva el seguimiento de pagos, vencimientos, promesas y disputas.
+- **Suscripciones** consolida la vista de vigencia y periodicidad del servicio recurrente.
+
+En el MVP, Suscripciones permite gestionar el ciclo de vida completo: **renovar, pausar y cancelar**, además de consultar la cartera. Las acciones se controlan mediante un permiso configurable, no por rol fijo. Los estados son **activa, pausada, cancelada y vencida**.
+
+Transiciones confirmadas: `activa ↔ pausada`; `activa → vencida` al terminar el periodo sin renovar; `vencida → activa` al renovar; `activa | pausada → cancelada`; `cancelada → activa` al reactivar o renovar. La reactivación conserva el historial de la misma suscripción.
+
+Al renovar, el sistema crea automáticamente una **factura en borrador** para el nuevo periodo. Facturación conserva su revisión, timbrado y emisión; Suscripciones no emite directamente el CFDI.
+
 ---
 
 ## 8. Reglas, decisiones y trazabilidad
 
-- Decisiones confirmadas: 60, en `discovery/DECISIONES-FUNCIONALES.md`.
-- Reglas confirmadas con ID único: 231, en `discovery/REGLAS-DE-NEGOCIO.md`.
+- Decisiones confirmadas: 68, en `discovery/DECISIONES-FUNCIONALES.md`.
+- Reglas confirmadas con ID único: 240, en `discovery/REGLAS-DE-NEGOCIO.md`.
 - Actores y permisos: `discovery/ACTORES-Y-PERMISOS.md`.
 - Flujos y handoffs: `discovery/FLUJOS-FUNCIONALES.md`.
 - Hallazgos y resoluciones: `discovery/HALLAZGOS.md`.

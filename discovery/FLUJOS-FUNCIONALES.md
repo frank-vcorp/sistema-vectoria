@@ -345,3 +345,25 @@ El flujo vigente se valida en `discovery/simulations/SIMULACION-FLUJO-PROYECTOS-
 - Cierre técnico con saldo pendiente.
 - Cierre administrativo y excepción del Director.
 - Cancelación y revisión de reembolso.
+
+---
+
+## 14. Ciclo de Suscripciones
+
+**Actor autorizado:** cualquier usuario con permiso configurable `gestionar_suscripciones`; las acciones quedan auditadas. No depende de un rol fijo.
+
+**Origen:** al autorizar una OS de tipo de cobro `suscripción`, el sistema crea automáticamente la Suscripción propia y la vincula a cliente, cotización y OS.
+
+**Estados:** `activa | pausada | cancelada | vencida`.
+
+**Transiciones confirmadas:**
+
+```text
+activa ↔ pausada
+activa → vencida          (termina el periodo sin renovación)
+vencida → activa          (renovación)
+activa | pausada → cancelada
+cancelada → activa        (reactivación o renovación, conserva historial)
+```
+
+Al renovar, el sistema crea una factura en borrador para el nuevo periodo. Facturación conserva la revisión/timbrado/emisión del CFDI y Cobranza el seguimiento del pago. Suscripciones presenta y administra el ciclo de vida de la cartera recurrente.

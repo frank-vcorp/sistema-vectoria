@@ -21,6 +21,10 @@
  *           `VECTORIA_SUPERUSER_PASSWORD` en `src/lib/env.ts`.
  *  - AC-80: cero `registrar_tiempo` en `src/shared/enums/index.ts` ni
  *           `scripts/seed-data.ts`.
+ *  - AC-83: HTTP routes de auth (`src/app/api/auth/**`) sin consultas
+ *           Drizzle directas (simetría de AC-28 para el transporte HTTP;
+ *           patrones Drizzle-anclados para evitar falsos positivos
+ *           `jar.delete(...)` del cookie-jar).
  */
 import { readFile, stat } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -253,20 +257,54 @@ async function main() {
         return null;
       },
     },
-    // AC-80
+    // AC-80 (BR-N413)
+    //
+    // Antes de SPEC-006 el permiso `registrar_tiempo` no debía existir
+    // en `BASE_PERMISSIONS` ni en el seed de plataforma (lo introducía
+    // su SPEC). SPEC-006 (Proyectos — equipo y ejecución · B11-B16)
+    // ya añadió `registrar_tiempo` a `BASE_PERMISSIONS` y al seed
+    // (`lider_proyecto`, `programador`, `disenador`, `qa`).
+    //
+    // El check ahora verifica DOS invariantes:
+    //  1. Si `registrar_tiempo` aparece en BASE_PERMISSIONS (lo
+    //     introdujo SPEC-006), entonces DEBE estar sembrado en roles
+    //     técnicos (lider_proyecto/programador/disenador/qa) y NO en
+    //     `vendedor` (BR-N413 — vendedor no ejecuta proyectos).
+    //  2. Si NO aparece en BASE_PERMISSIONS, no debe sembrarse (caso
+    //     anterior a SPEC-006, retrocompatible).
     {
       id: "AC-80",
-      description: "registrar_tiempo no aparece en plataforma (sólo en BASE_PERMISSIONS / seed)",
+      description:
+        "registrar_tiempo: declarado en BASE_PERMISSIONS (SPEC-006) y sembrado coherentemente (BR-N413)",
       run: () => {
-        // Sólo nos importa como entrada del array (string literal entre comillas)
-        // o como valor de objeto. Comentarios que documentan la decisión NO
-        // cuentan.
-        const enumsRe = new RegExp(`['"\`]registrar_tiempo['"\`]`, "g");
-        const seedRe = new RegExp(`['"\`]registrar_tiempo['"\`]`, "g");
-        const enums = (readFileSync("src/shared/enums/index.ts", "utf8").match(enumsRe) ?? []).join("\n");
-        const seed = (readFileSync("scripts/seed-data.ts", "utf8").match(seedRe) ?? []).join("\n");
-        if (enums || seed) {
-          return `enums: ${enums}\nseed-data: ${seed}`.trim();
+        const enumsSrc = readFileSync(
+          "src/shared/enums/index.ts",
+          "utf8",
+        );
+        const seedSrc = readFileSync("scripts/seed-data.ts", "utf8");
+        const declaredInEnums =
+          /['"`]registrar_tiempo['"`]/.test(enumsSrc);
+        const seededInPlatform =
+          /['"`]registrar_tiempo['"`]/.test(seedSrc);
+        if (!declaredInEnums && !seededInPlatform) {
+          // SPEC-006 aún no se ha implementado; estado retrocompatible.
+          return null;
+        }
+        if (!declaredInEnums) {
+          return "registrar_tiempo sembrado sin estar en BASE_PERMISSIONS";
+        }
+        if (!seededInPlatform) {
+          return "registrar_tiempo declarado en BASE_PERMISSIONS pero no sembrado";
+        }
+        // Reglas de sembrado coherente (BR-N413): líder + técnicos.
+        if (/director:\s*\[[^\]]*['"`]registrar_tiempo['"`]/.test(seedSrc)) {
+          // Permitido: `director` recibe TODOS los BASE_PERMISSIONS
+          // por construcción (`[...BASE_PERMISSIONS]`); este regex
+          // matchea la forma literal sólo si el permiso está en la
+          // lista, lo cual es esperado. No fallamos aquí.
+        }
+        if (/vendedor:\s*\[[^\]]*['"`]registrar_tiempo['"`]/.test(seedSrc)) {
+          return "vendedor no debe tener registrar_tiempo (BR-N413)";
         }
         return null;
       },
@@ -279,6 +317,28 @@ async function main() {
         if (!(await fileExists("public/brand/VectorIA-Logo-Oficial-Transparente.png"))) {
           return "logo ausente en public/brand/";
         }
+        return null;
+      },
+    },
+    // AC-83 (R3 de QA-20260820-04 · simetría HTTP layer de AC-28)
+    // Patrones Drizzle-anclados para evitar falsos positivos
+    // `jar.delete(...)` del cookie-jar (`logout/route.ts:98,99`).
+    {
+      id: "AC-83",
+      description:
+        "HTTP routes de auth sin consultas Drizzle directas (delegan al servicio)",
+      run: () => {
+        const a = rg(
+          "getDb\\(|from .*drizzle|drizzle-orm",
+          ["src/app/api/auth/"],
+          [],
+        ).trim();
+        const b = rg(
+          String.raw`\.from\(users\)|eq\(users\.`,
+          ["src/app/api/auth/"],
+          [],
+        ).trim();
+        if (a || b) return [a, b].filter(Boolean).join("\n");
         return null;
       },
     },

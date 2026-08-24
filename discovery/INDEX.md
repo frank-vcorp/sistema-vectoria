@@ -1,10 +1,10 @@
 # INDEX · Vector IA — Discovery funcional
 
-**Versión:** 2026-08-17 23:20
-**Estado:** `ready_for_integra`
-**Fuente funcional única:** `discovery/FUNCTIONAL-BASELINE.md` v1.0
+**Versión:** 2026-08-20
+**Estado:** `ready_for_integra`; la frontera Productos/Servicios, la política de roles base y la dirección visual están cerradas: toda oferta crea Proyecto, los roles seed siguen A1/B1/C1 y la UI usa Tailwind + shadcn/ui con tema VectorIA y paridad operativa en móvil, tableta y escritorio.
+**Fuente funcional única:** `discovery/FUNCTIONAL-BASELINE.md` v1.12
 
-El discovery funcional está consolidado, sin contradicciones P0 ni preguntas bloqueantes. El flujo de Proyectos fue cerrado y simulado antes del handoff.
+El discovery funcional está consolidado, sin contradicciones P0 ni preguntas bloqueantes. El flujo de Proyectos fue cerrado y simulado antes del handoff. El antiguo gap de SPEC-002 quedó resuelto por `DEC-20260823-01`.
 
 ---
 
@@ -15,12 +15,12 @@ El discovery funcional está consolidado, sin contradicciones P0 ni preguntas bl
 | `FUNCTIONAL-BASELINE.md` | Fuente funcional canónica | READY |
 | `HANDOFF-FUNCIONAL-A-INTEGRA.md` | Contrato de entrega funcional | READY |
 | `ESTADO-FUNCIONAL.md` | Definition of Ready y estado por área | READY |
-| `DECISIONES-FUNCIONALES.md` | 60 decisiones confirmadas | READY |
-| `REGLAS-DE-NEGOCIO.md` | 231 reglas confirmadas con ID único | READY |
+| `DECISIONES-FUNCIONALES.md` | 75 decisiones confirmadas | READY |
+| `REGLAS-DE-NEGOCIO.md` | 246 reglas confirmadas con ID único | READY |
 | `ACTORES-Y-PERMISOS.md` | Roles, visibilidad y acciones críticas | READY |
 | `FLUJOS-FUNCIONALES.md` | Estados, transiciones y handoffs | READY |
 | `HALLAZGOS.md` | Contradicciones históricas y resolución | READY |
-| `PREGUNTAS-ABIERTAS.md` | Cero bloqueantes; Q-NB-3 diferida | READY |
+| `PREGUNTAS-ABIERTAS.md` | Cero preguntas bloqueantes; `DISCOVERY-GAP-20260823-01` resuelto; Q-NB-3 resuelta | READY |
 | `SIMULACIONES.md` | Índice y estado de simulaciones | READY |
 | `OPEN-QUESTIONS.md` | Control de contaminación operativa | READY |
 
@@ -75,12 +75,14 @@ La simulación vigente cubre happy path, bloqueos, rechazos, pruebas fallidas, c
 
 ---
 
-## 5. Pendiente diferido
+## 5. Pendientes diferidos
 
 Q-NB-3: política de desviación contra presupuesto declarado. Sólo afecta una automatización futura de Comercial. Si INTEGRA la necesita, emite `DISCOVERY-GAP`; no debe inferirla.
+
+Suscripciones: ciclos mensual/trimestral/semestral/anual, gestión completa, autoridad por permiso, transiciones, origen desde OS y factura borrador por renovación confirmados en DEC-FUN-20260818-61 a -67. Puede pasar a SPEC técnica cuando cumpla sus dependencias.
 
 ---
 
 ## 6. Próximo propietario
 
-INTEGRA puede comenzar las especificaciones técnicas usando `HANDOFF-FUNCIONAL-A-INTEGRA.md`. Debe preservar los IDs DEC/BR/FLOW/SCN y devolver cualquier decisión nueva de producto a ATLAS/Frank.
+INTEGRA puede continuar las especificaciones técnicas del alcance previo usando `HANDOFF-FUNCIONAL-A-INTEGRA.md`. Debe preservar los IDs DEC/BR/FLOW/SCN y devolver cualquier decisión nueva de producto a ATLAS/Frank. ATLAS entregará un delta funcional para Suscripciones antes de su SPEC técnica.

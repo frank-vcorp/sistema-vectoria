@@ -3,7 +3,7 @@
 **Sistema:** Vector IA Administración
 **Fecha:** 2026-08-17
 **Estado:** `READY`
-**Fuente canónica:** `discovery/FUNCTIONAL-BASELINE.md` v1.0
+**Fuente canónica:** `discovery/FUNCTIONAL-BASELINE.md` v1.4
 **Gate:** cero preguntas funcionales bloqueantes y cero contradicciones P0 vigentes.
 
 ---
@@ -38,6 +38,7 @@ El resultado esperado es trazabilidad entre lo vendido, lo ejecutado, lo entrega
 - Requerimientos, tareas, pruebas, entregables y cambios de alcance.
 - Facturación CFDI con FacturoPorTi.
 - Cobranza, pagos, comisiones y finanzas.
+- Suscripciones recurrentes: cartera, ciclos, vigencia y gestión completa.
 - Dashboard, administración, bitácora y auditoría.
 
 ### Excluido del MVP
@@ -56,8 +57,8 @@ El resultado esperado es trazabilidad entre lo vendido, lo ejecutado, lo entrega
 | Artefacto | Uso por INTEGRA |
 |---|---|
 | `FUNCTIONAL-BASELINE.md` | Fuente funcional canónica |
-| `DECISIONES-FUNCIONALES.md` | 60 decisiones confirmadas |
-| `REGLAS-DE-NEGOCIO.md` | 231 reglas confirmadas con ID único |
+| `DECISIONES-FUNCIONALES.md` | 65 decisiones confirmadas |
+| `REGLAS-DE-NEGOCIO.md` | 237 reglas confirmadas con ID único |
 | `ACTORES-Y-PERMISOS.md` | Autorización y visibilidad funcional |
 | `FLUJOS-FUNCIONALES.md` | Máquinas de estado y handoffs |
 | `SIMULACIONES.md` | Índice de cobertura |
@@ -170,3 +171,39 @@ INTEGRA decide la división técnica final y las dependencias entre SPECs.
 `FUNCTIONAL_HANDOFF_ACCEPTABLE = YES`
 
 Motivo: fuente única sincronizada, decisiones y reglas con ID, Proyectos con flujo completo, escenarios de excepción cubiertos, ninguna pregunta bloqueante y límites de rol respetados.
+
+---
+
+## 12. Delta funcional · Suscripciones (2026-08-18)
+
+**Estado:** `ready_for_integra` para la futura SPEC de Suscripciones.
+
+Suscripciones se incorpora como **octavo módulo operativo**, separado de Facturación y Cobranza:
+
+- **Facturación** conserva emisión y timbrado de CFDI.
+- **Cobranza** conserva pagos, vencimientos, promesas y disputas.
+- **Suscripciones** ofrece cartera propia y gestiona el ciclo del servicio recurrente.
+
+### Decisiones y reglas vinculantes
+
+| ID | Contenido |
+|---|---|
+| DEC-FUN-20260818-61 / BR-N399 | Panel propio de cartera de Suscripciones, separado de Facturación y Cobranza. |
+| DEC-FUN-20260818-62 / BR-N400 / BR-N401 | Ciclos mensual, trimestral, semestral y anual; MVP con consulta, renovación, pausa, cancelación y reactivación. |
+| DEC-FUN-20260818-63 / BR-N402 | Las acciones requieren permiso configurable `gestionar_suscripciones`; no dependen de rol fijo y se auditan. |
+| DEC-FUN-20260818-64 / BR-N403 | Estados: activa, pausada, cancelada y vencida. |
+| DEC-FUN-20260818-65 / BR-N404 | Transiciones: activa ↔ pausada; activa → vencida sin renovación; vencida → activa al renovar; activa/pausada → cancelada; cancelada → activa al reactivar o renovar, conservando historial. |
+| DEC-FUN-20260818-66 / BR-N405 | Suscripción como entidad propia, creada automáticamente al autorizar una OS con tipo de cobro `suscripción`; conserva cliente, cotización y OS de origen. |
+| DEC-FUN-20260818-67 / BR-N406 | Renovar crea automáticamente una factura en borrador del nuevo periodo; Facturación conserva revisión, timbrado y emisión. |
+| DEC-FUN-20260818-68 / BR-N407 | Toda oferta vendida requiere Proyecto por intervención técnica especialista; toda OS autorizada crea Proyecto y una OS de suscripción crea además la entidad Suscripción. |
+
+### Invariantes funcionales del delta
+
+1. Facturación y Cobranza no son reemplazadas por Suscripciones.
+2. Renovar, pausar, cancelar o reactivar exige `gestionar_suscripciones` y auditoría.
+3. Una reactivación de una suscripción cancelada conserva su historial.
+4. La periodicidad se muestra y filtra como mensual, trimestral, semestral o anual.
+
+### Instrucción a INTEGRA
+
+Incluye una SPEC técnica de Suscripciones en el plan, después de las capacidades que proporcionen la relación con clientes, facturación y cobranza. No delegues implementación a SOFIA hasta que la SPEC esté lista y la Plataforma Base cumpla su gate.

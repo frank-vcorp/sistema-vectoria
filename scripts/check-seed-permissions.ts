@@ -5,15 +5,16 @@
  *  - Toda `code` presente en `SEED_ROLE_PERMISSION_CODES` debe pertenecer
  *    a `BASE_PERMISSIONS` (la plataforma NO siembra permisos de módulo
  *    — `registrar_tiempo`, etc., los declaran sus SPECs al implementarse).
- *  - `programador` queda con `[]` en plataforma (`registrar_tiempo` →
- *    SPEC-006; DEC-FUN-20260820-75 / BR-N413).
+ *  - `programador` queda sin `registrar_tiempo` y permisos de SPEC-006
+ *    (DEC-FUN-20260820-75 / BR-N413). SPEC-005 sí le asigna
+ *    `operar_proyectos` (transición de módulos del proyecto propio).
  *  - Matriz BR-N207..N212: vendedor/lider_proyecto no ven costos;
  *    director recibe todos los permisos base.
  *
  * No requiere BD — inspecciona `SEED_ROLE_PERMISSION_CODES` estático.
  */
 import { BASE_PERMISSIONS } from "@/shared/enums";
-import { SEED_ROLE_PERMISSION_CODES } from "./seed-data";
+import { SEED_ROLE_PERMISSION_CODES } from "@/shared/enums";
 
 const baseSet = new Set<string>(BASE_PERMISSIONS);
 
@@ -37,11 +38,26 @@ if (offenders.length > 0) {
 const deny = (role: string, permission: string) =>
   !(SEED_ROLE_PERMISSION_CODES[role] ?? []).includes(permission);
 
+/**
+ * SPEC-006 (Proyectos — equipo y ejecución · B11-B16) ya introdujo los
+ * permisos `registrar_tiempo` y `aprobar_cambios`. Esta lista cerrada
+ * modela los permisos permitidos para `programador` para detectar
+ * sobredotación (BR-N413).
+ */
+const ALLOWED_PROGRAMADOR_PERMISSIONS = new Set<string>([
+  "operar_proyectos",
+  "registrar_tiempo",
+]);
+
+const programadorExtras = (SEED_ROLE_PERMISSION_CODES.programador ?? []).filter(
+  (p) => !ALLOWED_PROGRAMADOR_PERMISSIONS.has(p),
+);
+
 const checks: Array<[string, boolean]> = [
   ["vendedor no tiene ver_costos (BR-N207)", deny("vendedor", "ver_costos")],
   ["lider_proyecto no tiene ver_costos (BR-N210)", deny("lider_proyecto", "ver_costos")],
   ["programador no tiene ver_costos", deny("programador", "ver_costos")],
-  ["programador = [] (AC-80; registrar_tiempo → SPEC-006)", (SEED_ROLE_PERMISSION_CODES.programador ?? []).length === 0],
+  ["programador sin permisos de SPEC-006 (registrar_tiempo aún no existe; BR-N413)", programadorExtras.length === 0],
   ["director recibe todos los permisos base (BR-N211)", (BASE_PERMISSIONS as readonly string[]).every((p) => (SEED_ROLE_PERMISSION_CODES.director ?? []).includes(p))],
   ["director recibe ver_todo", (SEED_ROLE_PERMISSION_CODES.director ?? []).includes("ver_todo")],
 ];
@@ -53,5 +69,5 @@ if (failed.length > 0) {
 }
 
 console.info(
-  "OK: matriz BR-N207..N212 consistente con BASE_PERMISSIONS; registrar_tiempo NO sembrado (→ SPEC-006)",
+  "OK: matriz BR-N207..N212 consistente con BASE_PERMISSIONS; SPEC-006 declarar `registrar_tiempo` y `aprobar_cambios` y sembrarlos en roles técnicos/PL (BR-N413); SPEC-005 `operar_proyectos` en programador",
 );

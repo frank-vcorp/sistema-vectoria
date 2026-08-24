@@ -39,6 +39,12 @@
 | BR-N210 | El Líder de Proyecto no ve precios, márgenes, cuentas por cobrar ni comisiones. |
 | BR-N211 | El Director ve todo el sistema. |
 | BR-N212 | El Programador sólo ve los proyectos en los que tiene módulos asignados. |
+| BR-N408 | El Director puede editar el label visible de un rol base, pero su código de identidad permanece inmutable. |
+| BR-N409 | Los permisos de los roles base son inmutables; las variaciones de permisos se resuelven creando roles adicionales. |
+| BR-N410 | Un rol base con usuarios asignados no se puede desactivar hasta que todos hayan sido reasignados. |
+| BR-N411 | Si el total de una cotización supera 1.5 veces el presupuesto declarado, el sistema muestra una advertencia clara con ambos montos, sin bloquear el flujo ni exigir aprobación adicional. |
+| BR-N412 | Antes de emitir la primera invitación, el bootstrap crea y conserva el usuario técnico SuperUser con correo `contacto@vector-ia.mx` como emisor trazable. Su contraseña inicial se provisiona como secreto y no se registra en artefactos de negocio. |
+| BR-N413 | Plataforma Base siembra sólo sus permisos propios; cada módulo declara y siembra sus permisos al implementarse. |
 
 ---
 
@@ -326,10 +332,27 @@
 
 ---
 
+## B20a · Suscripciones
+
+| ID | Regla |
+|---|---|
+| BR-N399 | El sistema cuenta con un módulo de Suscripciones separado de Facturación y Cobranza, con panel propio para visualizar la cartera de servicios recurrentes y su información relacionada de facturación y cobranza. (DEC-FUN-20260818-61.) |
+| BR-N400 | Cada suscripción usa una periodicidad mensual, trimestral, semestral o anual; el panel permite distinguir y filtrar la cartera por cada periodicidad. (DEC-FUN-20260818-62.) |
+| BR-N401 | En el MVP, el módulo de Suscripciones permite consultar, renovar, pausar, cancelar y reactivar una suscripción. Facturación conserva la emisión de CFDI y Cobranza conserva el seguimiento del pago. (DEC-FUN-20260818-62/-65.) |
+| BR-N402 | Renovar, pausar, cancelar o reactivar una suscripción exige el permiso configurable `gestionar_suscripciones`; no depende de un rol fijo y toda acción queda auditada. (DEC-FUN-20260818-63/-65.) |
+| BR-N403 | Estados de Suscripciones: activa, pausada, cancelada y vencida. Las transiciones se rigen por Q-20260818-04. (DEC-FUN-20260818-64.) |
+| BR-N404 | Transiciones de Suscripciones: activa ↔ pausada; activa → vencida al terminar periodo sin renovar; vencida → activa al renovar; activa o pausada → cancelada; cancelada → activa al reactivar o renovar, conservando historial. (DEC-FUN-20260818-65.) |
+| BR-N405 | Una Suscripción es una entidad propia creada automáticamente al autorizar una OS con tipo de cobro `suscripción`; conserva vínculo con cliente, cotización y OS de origen. (DEC-FUN-20260818-66.) |
+| BR-N406 | Renovar una Suscripción crea automáticamente una factura en borrador para el nuevo periodo. Facturación conserva revisión, timbrado y emisión; Suscripciones no emite CFDI directamente. (DEC-FUN-20260818-67.) |
+| BR-N407 | Toda oferta vendida requiere Proyecto por intervención de un técnico especialista (configuración, activación, ajuste, mantenimiento u otra actividad). Toda OS autorizada crea Proyecto; si su tipo de cobro es `suscripción`, también crea la entidad Suscripción. (DEC-FUN-20260818-68.) |
+
+---
+
 ## B21 · Finanzas y movimientos
 
 | ID | Regla |
 |---|---|
+
 | BR-013 | Un movimiento "reconciled" no se edita ni elimina. |
 | BR-014 | Cancelar o revertir operaciones críticas exige motivo y genera auditoría. |
 | BR-015 | Los importes vendidos, facturados y cobrados se calculan y muestran por separado. |
@@ -343,6 +366,17 @@
 | BR-N333 | Los costos directos se imputan a un proyecto cuando el movimiento es un gasto confirmado o conciliado. |
 | BR-N334 | El costo de horas por proyecto usa el costo por hora vigente al momento del registro. |
 | BR-N335 | La rentabilidad por proyecto combina costo laboral + costo directo contra importe vendido. |
+
+---
+
+## B24 · Provisionamiento global de infraestructura
+
+| ID | Regla |
+|---|---|
+| BR-N414 | Todo software desplegable construido por Vectoria provisiona automáticamente su infraestructura estándar en el destino resuelto, sin intención adicional ni intervención operativa de Frank. (DEC-FUN-20260820-76.) |
+| BR-N415 | El destino se resuelve en este orden: override explícito de Frank; infraestructura existente del proyecto; Coolify/Contabo Vectoria por defecto. Un override puede seleccionar local, otro proveedor o no provisionar. (DEC-FUN-20260820-76.) |
+| BR-N416 | El provisionamiento crea o reconcilia únicamente los recursos exigidos por la SPEC, reutiliza recursos existentes y materializa UUIDs reales automáticamente; no usa allowlists estáticas de UUIDs smoke. (DEC-FUN-20260820-76/-77.) |
+| BR-N417 | Deploy a producción, delete, billing y migraciones irreversibles permanecen fuera del provisionamiento estándar y requieren autorización separada vigente. (DEC-FUN-20260820-77.) |
 
 ---
 
@@ -447,3 +481,14 @@
 | **Total con ID** | **231** |
 
 > **Nota:** la simulación del 17-ago arrastró cálculos incorrectos (mezcló costo-hora cotizado con snapshot interno; re-aplicó el % de comisión al liberarla). Estos son hallazgos P2 — ver HALLAZGOS H-20260817-11. Las reglas formales de cálculo son las de la sección B26.
+
+---
+
+## B25 · Destino global de infraestructura
+
+| ID | Regla |
+|---|---|
+| BR-N418 | Todo proyecto nuevo desplegable construido por Vectoria debe provisionarse automáticamente en el Coolify/Contabo propio existente, salvo override explícito de Frank. |
+| BR-N419 | La selección de destino no se decide por heurística del nombre del proyecto: el manifest global debe declarar el runner, target, recursos, repo/rama, DNS, healthcheck y perfil runtime. |
+| BR-N420 | Antes de provisionar cada proyecto, el flujo debe verificar versión/contrato de Coolify, salud del servidor y dependencias; si un dato crítico no está disponible, queda bloqueado sin inventar valores ni crear recursos parciales no reconciliables. |
+| BR-N421 | La infraestructura reusable debe ser namespaced por proyecto y probar al menos dos proyectos simultáneos, idempotencia, adopción segura y ausencia de cruces de secretos, UUIDs o DNS. |

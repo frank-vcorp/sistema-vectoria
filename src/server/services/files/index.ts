@@ -161,3 +161,26 @@ export function assertTtlOk(ttlSeconds: number): void {
 }
 
 export const __MAX_TTL_SECONDS__ = MAX_TTL_SECONDS;
+
+/**
+ * Bootstrap: instancia `FilesService` a partir del entorno validado
+ * (`src/lib/env`). Usado por routers y servicios que necesitan
+ * persistir/leer archivos (CFDI XML/PDF, evidencias, etc.). Mismo
+ * patrón que `buildCryptoServiceFromEnv`.
+ *
+ * NOTA: la importación de `lib/env` se hace de forma lazy para no
+ * forzar `EnvSchema` al ejecutar los tests puros del helper
+ * `assertTtlOk` (que importan este módulo sin querer cargar env).
+ */
+export async function buildFilesServiceFromEnv(): Promise<FilesService> {
+  const { loadEnv } = await import("@/lib/env");
+  const env = loadEnv();
+  return createFilesService({
+    endPoint: env.S3_ENDPOINT,
+    useSSL: env.S3_FORCE_PATH_STYLE ? true : false,
+    accessKey: env.S3_ACCESS_KEY,
+    secretKey: env.S3_SECRET_KEY,
+    bucket: env.S3_BUCKET,
+    region: env.S3_REGION,
+  });
+}
