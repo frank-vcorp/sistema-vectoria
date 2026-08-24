@@ -106,7 +106,7 @@ export async function runPreflight(input: PreflightInput): Promise<PreflightRepo
 
   // P13: manifest schema
   const m = checkManifest(input.manifestRaw);
-  checks["manifest"] = { ok: m.ok, reason: m.reason };
+  checks["manifest"] = { ok: m.ok, ...(m.reason ? { reason: m.reason } : {}) };
   if (!m.ok || !m.manifest) {
     drift.push("manifest_invalid");
     return {
