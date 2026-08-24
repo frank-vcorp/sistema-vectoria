@@ -194,7 +194,7 @@ export const projectMembers = pgTable(
       "project_members_org_project_active_lider_unique",
     )
       .on(t.organizationId, t.projectId)
-      .where(sql`t.project_role = 'lider' AND t.active = true`),
+      .where(sql`${t.projectRole} = 'lider' AND ${t.active} = true`),
     projectFk: foreignKey({
       name: "project_members_project_fk",
       columns: [t.organizationId, t.projectId],

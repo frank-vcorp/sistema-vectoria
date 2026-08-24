@@ -2135,7 +2135,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "modules_org_project_code_unique" ON "modules"
 CREATE INDEX IF NOT EXISTS "modules_org_project_idx" ON "modules" USING btree ("organization_id","project_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "project_members_org_project_idx" ON "project_members" USING btree ("organization_id","project_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "project_members_org_user_idx" ON "project_members" USING btree ("organization_id","user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "project_members_org_project_active_lider_unique" ON "project_members" USING btree ("organization_id","project_id") WHERE t.project_role = 'lider' AND t.active = true;--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "project_members_org_project_active_lider_unique" ON "project_members" USING btree ("organization_id","project_id") WHERE "project_role" = 'lider' AND "active" = true;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "project_scope_snapshots_org_project_idx" ON "project_scope_snapshots" USING btree ("organization_id","project_id");--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "projects_org_code_unique" ON "projects" USING btree ("organization_id","code");--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "projects_org_order_unique" ON "projects" USING btree ("organization_id","order_id");--> statement-breakpoint
