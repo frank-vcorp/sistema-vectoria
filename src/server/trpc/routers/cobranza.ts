@@ -7,7 +7,7 @@
  * `src/server/services/cobranza/*`.
  *
  * Sub-routers:
- *  - `cobros`: register/update/confirm/reverse/apply/list/byId/
+ *  - `cobros`: register/update/confirm/reverse/applyPayment/list/byId/
  *    listApplications.
  *  - `comisiones`: estimate/release/reverseOnCancel/pay/cancelOnOsCancel/
  *    list/byId/byOrder.
@@ -130,7 +130,7 @@ export const cobranzaRouter = router({
           throw toTrpcError(e);
         }
       }),
-    apply: protectedProcedure
+    applyPayment: protectedProcedure
       .input(PaymentApplyInputSchema)
       .mutation(async ({ input, ctx }) => {
         try {

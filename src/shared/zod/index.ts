@@ -1354,7 +1354,7 @@ export const PaymentReverseInputSchema = z.object({
     .min(3, "Motivo ≥3 caracteres (BR-N318)"),
 });
 
-/** SPEC-008 AC-2 · input de `cobros.apply` (BR-012/308). */
+/** SPEC-008 AC-2 · input de `cobros.applyPayment` (BR-012/308). */
 export const PaymentApplyInputSchema = z.object({
   paymentId: uuidSchema,
   invoiceId: uuidSchema,
