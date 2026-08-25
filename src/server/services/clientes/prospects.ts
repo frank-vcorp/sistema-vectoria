@@ -132,10 +132,24 @@ export type ProspectScope = "own" | "all";
  * - Director / Admin (`ver_todo`) → todos.
  * - Vendedor (con `gestionar_prospectos` y sin `ver_todo`) → propios.
  * - Sin permiso `gestionar_prospectos` → `ForbiddenError`.
+ *
+ * AC-81 / ADR-06 §3.1: las decisiones de autorización de prospectos se
+ * evalúan contra BD (`forceDb: true`) para evitar la ventana de
+ * exposición entre el sembrado de `user_roles` y la renovación del
+ * access token (mismo patrón que OS, proyectos, cobranza). El cache de
+ * `ctx.permissions` no es fuente de verdad mientras la sesión carga
+ * roles vacíos (`auth.me` puede llegar con `roles=[]` justo después del
+ * sembrado inicial; el vínculo `user_roles` ya existe en BD).
  */
 export async function resolveProspectScope(
   ctx: Context,
-  hasPerm: { has(ctx: Context, code: string): Promise<boolean> },
+  hasPerm: {
+    has(
+      ctx: Context,
+      code: string,
+      opts?: { forceDb?: boolean },
+    ): Promise<boolean>;
+  },
 ): Promise<ProspectScope> {
   // `requireUser` valida que haya sesión; no usamos `user` aquí porque la
   // decisión depende sólo de permisos (BR-N207). Lo invocamos para
@@ -143,7 +157,9 @@ export async function resolveProspectScope(
   // consistente con el resto de servicios.
   requireUser(ctx);
   // Permiso base del módulo (Director/Admin sembrados, Vendedor sembrado por SPEC-002 §7).
-  const canManage = await hasPerm.has(ctx, "gestionar_prospectos");
+  const canManage = await hasPerm.has(ctx, "gestionar_prospectos", {
+    forceDb: true,
+  });
   if (!canManage) {
     throw new DomainError(
       "ForbiddenError",
@@ -152,7 +168,7 @@ export async function resolveProspectScope(
       { code: "gestionar_prospectos" },
     );
   }
-  const seesAll = await hasPerm.has(ctx, "ver_todo");
+  const seesAll = await hasPerm.has(ctx, "ver_todo", { forceDb: true });
   return seesAll ? "all" : "own";
 }
 
@@ -177,7 +193,7 @@ export function createProspectsService(): ProspectsService {
       "@/server/services/hasPermission"
     );
     const hasPerm = createHasPermissionService();
-    await hasPerm.require(ctx, "gestionar_prospectos");
+    await hasPerm.require(ctx, "gestionar_prospectos", { forceDb: true });
     // Unicidad de `code` por organización (BR-N216 análogo prospecto).
     const [exists] = await db
       .select({ id: prospects.id })
@@ -238,7 +254,9 @@ export function createProspectsService(): ProspectsService {
     const { createHasPermissionService } = await import(
       "@/server/services/hasPermission"
     );
-    await createHasPermissionService().require(ctx, "gestionar_prospectos");
+    await createHasPermissionService().require(ctx, "gestionar_prospectos", {
+      forceDb: true,
+    });
     return withTx(async (tx) => {
       const [before] = await tx
         .select()
@@ -331,7 +349,9 @@ export function createProspectsService(): ProspectsService {
     const { createHasPermissionService } = await import(
       "@/server/services/hasPermission"
     );
-    await createHasPermissionService().require(ctx, "gestionar_prospectos");
+    await createHasPermissionService().require(ctx, "gestionar_prospectos", {
+      forceDb: true,
+    });
     // BR-N213 / BR-N214: motivo obligatorio.
     if (!reason || reason.trim().length < 3) {
       throw new DomainError(
@@ -402,7 +422,9 @@ export function createProspectsService(): ProspectsService {
     const { createHasPermissionService } = await import(
       "@/server/services/hasPermission"
     );
-    await createHasPermissionService().require(ctx, "gestionar_prospectos");
+    await createHasPermissionService().require(ctx, "gestionar_prospectos", {
+      forceDb: true,
+    });
     return withTx(async (tx) => {
       const [before] = await tx
         .select()
