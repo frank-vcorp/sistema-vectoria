@@ -303,6 +303,19 @@ export function CotizacionDetail({ id }: { id: string }) {
                 </span>
               </p>
             ) : null}
+            {q.clientId ? (
+              <p>
+                <span className="text-muted-foreground">
+                  {messages.cotizaciones.acceptedClientLabel}:{" "}
+                </span>
+                <span
+                  className="font-mono text-xs"
+                  data-testid="cotizacion-detail-accepted-client"
+                >
+                  {q.clientId}
+                </span>
+              </p>
+            ) : null}
             <div
               className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
               data-testid="cotizacion-detail-accepted-pending-os"

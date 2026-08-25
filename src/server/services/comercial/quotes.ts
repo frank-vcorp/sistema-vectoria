@@ -11,15 +11,22 @@
  *  - **Aceptación exige identidad+fecha+medio+evidencia** (BR-N237, H-08).
  *  - **Aceptada es inmutable** (BR-N02). Vigencia ≥7 días (BR-N235).
  *  - **Advertencia presupuestal no bloqueante** (BR-N411, AC-12).
- *  - **Side-effect OS delegado a SPEC-004** sin implementar fuera de
+  *  - **Side-effect OS delegado a SPEC-004** sin implementar fuera de
  *    alcance: `quotes.accept` registra `os.create_pending_from_quote`
  *    en `audit_logs` con los datos para que SPEC-004 los consuma.
+ *  - **Conversión prospecto→cliente al aceptar** (SPEC-027, ADR-05):
+ *    si `clientId` es null y `prospectId` real, dentro de la misma
+ *    transacción se reutiliza o crea el cliente del prospecto y se
+ *    enlaza `quotes.client_id` antes de marcar `accepted`. Si
+ *    `clientId` ya existe, no se toca.
  */
 import { and, eq, sql } from "drizzle-orm";
 import { getDb, withTx } from "@/server/db/client";
 import {
+  clients,
   fileLinks,
   files,
+  prospects,
   quoteAcceptances,
   quoteItems,
   quotes,
@@ -224,6 +231,112 @@ async function nextCode(orgId: string): Promise<string> {
   if (!m || !m[1]) return "QT-0001";
   const n = (parseInt(m[1], 10) + 1).toString().padStart(4, "0");
   return `QT-${n}`;
+}
+
+/**
+ * Genera el siguiente `clientNumber` por organización dentro de una
+ * transacción. Espejo de `nextClientNumber` en `services/clientes/
+ * clients.ts` (BR-N216) para uso interno en transacciones de
+ * aceptación; la colisión bajo concurrencia la captura el
+ * `UNIQUE (organizationId, clientNumber)` y la app reintenta.
+ */
+async function nextClientNumberTx(
+  tx: ReturnType<typeof getDb>,
+  orgId: string,
+): Promise<string> {
+  const [row] = await tx
+    .select({ n: sql<string>`max(client_number)` })
+    .from(clients)
+    .where(eq(clients.organizationId, orgId));
+  const last = row?.n ?? null;
+  if (!last) return "C-000001";
+  const m = /^C-(\d{1,})$/.exec(last);
+  if (!m || !m[1]) return "C-000001";
+  const n = (parseInt(m[1], 10) + 1).toString().padStart(6, "0");
+  return `C-${n}`;
+}
+
+/**
+ * SPEC-027 / ADR-05: garantiza que existe un cliente para el
+ * prospecto, dentro de la transacción de aceptación. Si ya existe
+ * uno para `(organizationId, prospectId)`, lo reutiliza (idempotente).
+ * Si no, lo crea a partir del prospecto (name/company/email; nunca
+ * RFC ni contactos inventados). Devuelve el `id` del cliente.
+ *
+ * Lanza `PROSPECT_NOT_FOUND` (404) si el prospecto no existe en la
+ * misma organización. Cualquier fallo de FK/unique queda
+ * propagado y la transacción externa hace rollback automático.
+ */
+async function ensureClientForProspect(
+  ctx: Context,
+  tx: ReturnType<typeof getDb>,
+  orgId: string,
+  prospectId: string,
+): Promise<string> {
+  // 1) Idempotencia: si ya hay cliente para este prospecto, reusar.
+  const [existing] = await tx
+    .select({ id: clients.id })
+    .from(clients)
+    .where(
+      and(
+        eq(clients.organizationId, orgId),
+        eq(clients.prospectId, prospectId),
+      ),
+    )
+    .limit(1);
+  if (existing) return existing.id;
+
+  // 2) Cargar prospecto en la misma organización.
+  const [p] = await tx
+    .select()
+    .from(prospects)
+    .where(
+      and(
+        eq(prospects.id, prospectId),
+        eq(prospects.organizationId, orgId),
+      ),
+    )
+    .limit(1);
+  if (!p) {
+    throw new DomainError(
+      "PROSPECT_NOT_FOUND",
+      "Prospecto no encontrado para conversión al aceptar",
+      404,
+    );
+  }
+
+  // 3) Generar clientNumber y crear cliente con datos del prospecto.
+  const clientNumber = await nextClientNumberTx(tx, orgId);
+  const [row] = await tx
+    .insert(clients)
+    .values({
+      organizationId: orgId,
+      clientNumber,
+      prospectId: p.id,
+      name: p.name,
+      company: p.company ?? null,
+      email: p.email ?? null,
+      phone: null,
+      status: "active",
+    })
+    .returning();
+  if (!row) throw new Error("client insert sin fila (aceptación)");
+
+  // 4) Auditar la creación. No incluye secretos.
+  const { createAuditService } = await import("@/server/services/audit");
+  await createAuditService().record(ctx, {
+    entityType: "client",
+    entityId: row.id,
+    action: "client.create",
+    after: {
+      clientNumber: row.clientNumber,
+      prospectId: row.prospectId,
+      name: row.name,
+      status: row.status,
+      source: "quote.accept",
+    },
+  });
+  return row.id;
 }
 
 export function createQuotesService(): QuotesService {
@@ -824,6 +937,21 @@ export function createQuotesService(): QuotesService {
           );
         }
       }
+      // SPEC-027 / ADR-05: conversión prospecto→cliente dentro de la
+      // misma transacción. Si la cotización ya tiene `clientId` no se
+      // toca. Si `clientId` es null y `prospectId` es real, se
+      // reutiliza o crea el cliente del prospecto; cualquier fallo
+      // (prospecto inexistente, FK, unique) rollbackea la aceptación
+      // completa vía `withTx`.
+      let resolvedClientId: string | null = before.clientId;
+      if (!before.clientId && before.prospectId) {
+        resolvedClientId = await ensureClientForProspect(
+          ctx,
+          tx,
+          user.organization_id,
+          before.prospectId,
+        );
+      }
       // BR-N237: evidencia existe y pertenece a la organización.
       const [fileRow] = await tx
         .select()
@@ -860,11 +988,14 @@ export function createQuotesService(): QuotesService {
         entityType: "quote_acceptance",
         entityId: acceptance.id,
       });
-      // Cerrar cotización como `accepted`.
+      // Cerrar cotización como `accepted`. Si la conversión creó
+      // o reutilizó un cliente, se enlaza en el mismo UPDATE para
+      // que el DTO devuelto lleve `clientId` (SPEC-027/ADR-05).
       const [after] = await tx
         .update(quotes)
         .set({
           status: "accepted",
+          clientId: resolvedClientId,
           acceptedAt: new Date(),
           acceptedByProxy: input.proxy ? "vendedor" : "cliente",
           acceptedByUserId: user.id,
@@ -884,12 +1015,18 @@ export function createQuotesService(): QuotesService {
         entityType: "quote",
         entityId: after.id,
         action: "quote.accept",
-        before: { status: before.status },
+        before: {
+          status: before.status,
+          clientId: before.clientId,
+          prospectId: before.prospectId,
+        },
         after: {
           status: after.status,
           acceptedAt: after.acceptedAt,
           acceptedByProxy: after.acceptedByProxy,
           totalCents: after.totalCents,
+          clientId: after.clientId,
+          clientConverted: !before.clientId && !!resolvedClientId,
         },
         ...(ctx.actorRoleCode !== undefined ? { actorRoleCode: ctx.actorRoleCode } : {}),
       });

@@ -516,6 +516,7 @@ export const messages = {
     acceptedByProxyLabel: "Aceptada por (proxy)",
     acceptedEvidenceLabel: "Evidencia (UUID)",
     acceptedByUserLabel: "Aceptada por usuario",
+    acceptedClientLabel: "Cliente enlazado",
     statusCanonicalNote:
       "Estado canónico: sólo lectura en este punto (BR-N02).",
   },
