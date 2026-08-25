@@ -60,6 +60,7 @@ import {
   canTransitionProjectStage,
   computeCalculatedHealth,
   nextProjectCode,
+  shouldPromoteSituationOnTransitionStage,
   validateHealthOverride,
   validateProjectSituationReason,
 } from "./helpers";
@@ -540,9 +541,25 @@ export function createProjectsService(): ProjectsService {
           409,
         );
       }
+      // SPEC-005 AC-4 / IMPL-20260825-30 · el proyecto nace en
+      // `planning/pending` (SPEC §4.3). El primer `transitionStage`
+      // operativo debe activar la situación atómicamente, de modo que
+      // el happy path observable sea
+      // `planning/pending→…/active→…/completed` (BR-N375-378). Sólo
+      // `pending` se promueve aquí; `paused`/`cancelled`/`completed`
+      // están bloqueados aguas arriba (reglas explícitas + cierre
+      // técnico vía `closeTechnical`).
+      const situationPromotesToActive =
+        shouldPromoteSituationOnTransitionStage(before.statusSituation);
+      const updateSet: { statusStage: ProjectStage; statusSituation?: ProjectSituation } = {
+        statusStage: input.targetStage,
+      };
+      if (situationPromotesToActive) {
+        updateSet.statusSituation = "active";
+      }
       const [after] = await tx
         .update(projects)
-        .set({ statusStage: input.targetStage })
+        .set(updateSet)
         .where(
           and(
             eq(projects.id, input.projectId),
@@ -556,8 +573,16 @@ export function createProjectsService(): ProjectsService {
         entityType: "project",
         entityId: after.id,
         action: "project.transition_stage",
-        before: { statusStage: before.statusStage },
-        after: { statusStage: after.statusStage },
+        before: {
+          statusStage: before.statusStage,
+          statusSituation: before.statusSituation,
+        },
+        after: {
+          statusStage: after.statusStage,
+          ...(situationPromotesToActive
+            ? { statusSituation: after.statusSituation }
+            : {}),
+        },
       });
       return projectToDto(after);
     });

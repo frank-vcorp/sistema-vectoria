@@ -107,6 +107,7 @@ export {
   findJsonDiscoveryImmutableConflict,
   isProjectSituationTerminal,
   nextProjectCode,
+  shouldPromoteSituationOnTransitionStage,
   validateHealthOverride,
   validateProjectSituationReason,
   JSON_DISCOVERY_IMMUTABLE_FIELDS,

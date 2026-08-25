@@ -125,6 +125,20 @@ export function isProjectSituationTerminal(s: ProjectSituation | string): boolea
   return s === "completed" || s === "cancelled";
 }
 
+/**
+ * SPEC-005 / AC-4 / IMPL-20260825-30 · indica si `transitionStage`
+ * debe promover la situación de `pending` a `active` atómicamente al
+ * primer avance de etapa operativo. Sólo `pending` se promueve;
+ * `paused`/`cancelled`/`completed` están bloqueados aguas arriba
+ * (guards explícitos + cierre técnico). Helper puro, sin BD ni
+ * transacción, testeable en aislamiento.
+ */
+export function shouldPromoteSituationOnTransitionStage(
+  currentSituation: ProjectSituation | string,
+): boolean {
+  return currentSituation === "pending";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 3) Salud calculada y override (BR-N254)
 // ─────────────────────────────────────────────────────────────────────────────
