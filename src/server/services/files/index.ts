@@ -163,10 +163,71 @@ export function assertTtlOk(ttlSeconds: number): void {
 export const __MAX_TTL_SECONDS__ = MAX_TTL_SECONDS;
 
 /**
+ * Normaliza `S3_ENDPOINT` (URL completa o host desnudo) al contrato
+ * que espera `minio.Client`: `endPoint` = hostname sin esquema ni
+ * puerto; `port` = puerto explícito si existe; `useSSL` = derivado
+ * de `protocol === 'https:'`. Para host desnudo (sin esquema) se
+ * asume `http://` y `useSSL=false` (el caller controla TLS con la
+ * variable de entorno — no se reinterpreta `S3_FORCE_PATH_STYLE`
+ * como SSL).
+ *
+ * IMPLEMENTATION_DEFECT IMPL-20260825-26 · intento 2: el código
+ * previo pasaba `S3_ENDPOINT` crudo como `endPoint` (incluyendo
+ * esquema y puerto) y derivaba `useSSL` desde `S3_FORCE_PATH_STYLE`
+ * (incorrecto). MinIO exige hostname puro y `useSSL` del protocolo.
+ *
+ * NO expone ni persiste el endpoint/secretos en errores ni logs.
+ * El helper es puro (sin I/O) — testeable sin S3 real.
+ */
+export interface NormalizedS3Endpoint {
+  endPoint: string;
+  port?: number;
+  useSSL: boolean;
+}
+
+export function normalizeS3Endpoint(raw: string): NormalizedS3Endpoint {
+  if (typeof raw !== "string" || raw.length === 0) {
+    throw new Error("S3_ENDPOINT es obligatorio");
+  }
+  // Para host desnudo (sin `://`), anteponer `http://` para que
+  // `URL` parsee hostname/puerto sin asumir esquema por defecto.
+  // `URL` ya acepta esquema `http` y exige hostname no vacío.
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw)
+    ? raw
+    : `http://${raw}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error("S3_ENDPOINT inválido");
+  }
+  const useSSL = parsed.protocol === "https:";
+  // `URL.port` es string vacío cuando no hay puerto explícito; el
+  // cliente MinIO acepta `port` opcional. No asignamos puerto por
+  // defecto: el caller decide si MinIO local usa 80/443 o el que
+  // venga en `S3_ENDPOINT`.
+  const portStr = parsed.port;
+  const port = portStr.length > 0 ? Number(portStr) : undefined;
+  const endPoint = parsed.hostname;
+  if (endPoint.length === 0) {
+    throw new Error("S3_ENDPOINT sin hostname");
+  }
+  // Sanity-check: si el caller incluyó path o query (raro pero
+  // válido en `S3_ENDPOINT=http://host/foo`), MinIO los rechaza.
+  // Conservamos sólo `host[:port]` para mantener la invariante.
+  return { endPoint, ...(port !== undefined ? { port } : {}), useSSL };
+}
+
+/**
  * Bootstrap: instancia `FilesService` a partir del entorno validado
  * (`src/lib/env`). Usado por routers y servicios que necesitan
  * persistir/leer archivos (CFDI XML/PDF, evidencias, etc.). Mismo
  * patrón que `buildCryptoServiceFromEnv`.
+ *
+ * IMPLEMENTATION_DEFECT IMPL-20260825-26 · intento 2: normaliza
+ * `S3_ENDPOINT` con `normalizeS3Endpoint` antes de delegar a
+ * `createFilesService`. `useSSL` ahora deriva del protocolo de la
+ * URL (NO de `S3_FORCE_PATH_STYLE`, que es ortogonal a TLS).
  *
  * NOTA: la importación de `lib/env` se hace de forma lazy para no
  * forzar `EnvSchema` al ejecutar los tests puros del helper
@@ -175,9 +236,11 @@ export const __MAX_TTL_SECONDS__ = MAX_TTL_SECONDS;
 export async function buildFilesServiceFromEnv(): Promise<FilesService> {
   const { loadEnv } = await import("@/lib/env");
   const env = loadEnv();
+  const normalized = normalizeS3Endpoint(env.S3_ENDPOINT);
   return createFilesService({
-    endPoint: env.S3_ENDPOINT,
-    useSSL: env.S3_FORCE_PATH_STYLE ? true : false,
+    endPoint: normalized.endPoint,
+    ...(normalized.port !== undefined ? { port: normalized.port } : {}),
+    useSSL: normalized.useSSL,
     accessKey: env.S3_ACCESS_KEY,
     secretKey: env.S3_SECRET_KEY,
     bucket: env.S3_BUCKET,
