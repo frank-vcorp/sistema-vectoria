@@ -368,9 +368,13 @@ describe("SPEC-002-UI-20260824-05 · P4 UX · qualify con cuestionarios publicad
     expect(/calificar-submit-error/.test(src)).toBe(true);
     expect(/setSubmitError\(/.test(src)).toBe(true);
     // El éxito del query NO marca qualifies done sin la mutación succeed.
-    expect(/onSuccess:\s*\(\)\s*=>\s*\{[^}]*qualifyMutation\.mutate/.test(
-      src,
-    )).toBe(true);
+    // SPEC-002-UI-20260825-22 · el callback ahora acepta `response`
+    // para extraer el id real de respuesta del cuestionario.
+    expect(
+      /onSuccess:\s*\(.*?\)\s*=>\s*\{[\s\S]*?qualifyMutation\.mutate/.test(
+        src,
+      ),
+    ).toBe(true);
   });
   it("captura presupuesto declarado (MXN) y tipo de proyecto", () => {
     const src = readCalificarDialog();
@@ -440,6 +444,32 @@ function readCalificarDialog(): string {
   return _readFileSync(CALIFICAR_DIALOG_PATH, "utf8");
 }
 
+const GENERAR_ALCANCE_DIALOG_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "modules",
+  "clientes",
+  "prospectos",
+  "generar-alcance-dialog.tsx",
+);
+function readGenerarAlcanceDialog(): string {
+  return _readFileSync(GENERAR_ALCANCE_DIALOG_PATH, "utf8");
+}
+
+const ALCANCE_DETAIL_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "modules",
+  "comercial",
+  "alcance",
+  "alcance-detail.tsx",
+);
+function readAlcanceDetail(): string {
+  return _readFileSync(ALCANCE_DETAIL_PATH, "utf8");
+}
+
 async function readMessages(): Promise<unknown> {
   // Import estático a través del loader TS de Vitest; permite verificar
   // el catálogo de mensajes sin transpilación manual.
@@ -448,3 +478,209 @@ async function readMessages(): Promise<unknown> {
   };
   return mod.messages;
 }
+
+/**
+ * SPEC-002-UI-20260825-22 · P5 funcional — generar alcance desde
+ * respuesta de cuestionario (SPEC-003 B6 / BR-N220/231, regla de
+ * oro DEC-FUN-23).
+ *
+ * Cubre el camino real end-to-end de la UI:
+ *  1. El diálogo de calificación propaga el `responseId` REAL de
+ *     `submitResponse` al detalle del prospecto (no UUID dummy).
+ *  2. El detalle expone una acción "Generar alcance" sólo cuando
+ *     el prospecto está calificado Y existe responseId en memoria.
+ *  3. El nuevo diálogo consulta `trpc.comercial.plantillas.list`
+ *     y filtra por `active`, sin UUID dummy ni acceso a BD.
+ *  4. La mutación `alcance.generateDraft` se invoca con el
+ *     `responseId` real y el `templateId` real seleccionado.
+ *  5. El éxito expone el `scopeId` real con enlace
+ *     `/comercial/alcance/{scope.id}` y status `draft`.
+ *  6. El detalle del alcance lee `alcance.byId` (no placeholder) y
+ *     muestra id, status, prospecto, version, templateId,
+ *     questionnaireResponseId y los 6 bloques del contenido.
+ *  7. Si la página se recarga y no hay responseId local, no se
+ *     inventa un endpoint ni un id: la acción no aparece y se
+ *     muestra el mensaje canónico de "responseMissingNote".
+ *  8. No se rompe el flujo previo de Calificar / perdidos /
+ *     suspendidos / reactivar.
+ */
+describe("SPEC-002-UI-20260825-22 · P5 · generar alcance desde cuestionario", () => {
+  it("CalificarProspectoDialog propaga el responseId REAL al padre (no UUID dummy)", () => {
+    const src = readCalificarDialog();
+    // La firma del callback ahora incluye `responseId` real.
+    expect(/onSuccess\?:\s*\(info:\s*\{\s*responseId:\s*string\s*\}\)/.test(src)).toBe(true);
+    // submitResponse expone un `response` cuyo `id` se captura.
+    expect(/response\s+&&\s+typeof\s+response\s+===\s+["']object["']/.test(src)).toBe(true);
+    expect(/\(response as \{ id: string \}\)\.id/.test(src)).toBe(true);
+    // Conserva el id en memoria y lo pasa al qualify.
+    expect(/lastResponseIdRef\.current\s*=\s*responseId/.test(src)).toBe(true);
+    expect(/onSuccess\?\.\(\{ responseId \}\)/.test(src)).toBe(true);
+    // Anti-patrón: nunca UUIDs dummy.
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    // Sin acceso a BD directa ni window.prompt.
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+  });
+
+  it("El detalle del prospecto guarda el responseId y expone la acción Generar alcance", () => {
+    const src = readProspectoDetalle();
+    // Estado local para el responseId y el scope creado.
+    expect(/questionnaireResponseId,\s+setQuestionnaireResponseId/.test(src)).toBe(true);
+    expect(/createdScope,\s+setCreatedScope/.test(src)).toBe(true);
+    // Recibe el id real en onSuccess.
+    expect(/onSuccess=\{\(info\)[\s\S]*?setQuestionnaireResponseId\(info/.test(src)).toBe(true);
+    // Acción visible sólo cuando prospecto calificado Y responseId presente.
+    expect(/p\.status\s*===\s*["']calificado["']\s*&&\s*questionnaireResponseId/.test(src)).toBe(true);
+    expect(/prospecto-generar-alcance-button/.test(src)).toBe(true);
+    // Enlace al detalle del alcance con el id real.
+    expect(/`\/comercial\/alcance\/\$\{createdScope\.id\}`/.test(src)).toBe(true);
+    // Anti-patrón: nunca UUIDs dummy, ni window.prompt, ni acceso a BD.
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+  });
+
+  it("El diálogo GenerarAlcanceDialog consulta plantillas reales y filtra activas (sin UUID dummy)", () => {
+    const src = readGenerarAlcanceDialog();
+    // Llama al query real de plantillas y filtra activas.
+    expect(/comercial\.plantillas\.list\.useQuery/.test(src)).toBe(true);
+    expect(/\.filter\(\(t\)\s*=>\s*t\.active\)/.test(src)).toBe(true);
+    // No usa accesso a BD directa.
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+    // No UUIDs dummy hardcodeados.
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    // Accesibilidad: label, role=alert para errores.
+    expect(/htmlFor=/.test(src)).toBe(true);
+    expect(/role="alert"/.test(src)).toBe(true);
+    expect(/aria-required=/.test(src)).toBe(true);
+  });
+
+  it("GenerarAlcanceDialog invoca alcance.generateDraft con questionnaireResponseId y templateId reales", () => {
+    const src = readGenerarAlcanceDialog();
+    expect(/alcance\.generateDraft\.useMutation/.test(src)).toBe(true);
+    expect(/generateDraft\.mutate\(\s*\{[\s\S]*?questionnaireResponseId,[\s\S]*?templateId/.test(src)).toBe(true);
+    // onSuccess expone scope.id REAL al padre.
+    expect(/\(scope as \{ id: string \}\)\.id/.test(src)).toBe(true);
+    expect(/onSuccess\?\.\(\{[\s\S]*?id:[\s\S]*?status:[\s\S]*?version:[\s\S]*?\}\)/.test(src)).toBe(true);
+  });
+
+  it("El detalle del prospecto muestra el aviso neutro cuando no hay responseId (recarga)", () => {
+    const src = readProspectoDetalle();
+    // El aviso sólo se renderiza cuando status === 'calificado' y NO hay responseId.
+    expect(/p\.status\s*===\s*["']calificado["']\s*&&\s*!questionnaireResponseId/.test(src)).toBe(true);
+    expect(/prospecto-alcance-missing-response/.test(src)).toBe(true);
+  });
+
+  it("Las acciones existentes de prospecto no se rompen", () => {
+    const src = readProspectoDetalle();
+    // Calificar, perdido, suspendido, reactivar siguen existiendo.
+    expect(/openDialog\(["']lost["']\)/.test(src)).toBe(true);
+    expect(/openDialog\(["']suspended["']\)/.test(src)).toBe(true);
+    expect(/prospecto-mark-lost-button/.test(src)).toBe(true);
+    expect(/prospecto-mark-suspended-button/.test(src)).toBe(true);
+    expect(/prospecto-reactivate-button/.test(src)).toBe(true);
+    expect(/reactivate\.mutate\(\{ prospectId: p\.id \}\)/.test(src)).toBe(true);
+  });
+});
+
+/**
+ * SPEC-002-UI-20260825-22 · Catálogo de mensajes para el flujo
+ * "Generar alcance" — impide literales ad-hoc en los componentes.
+ */
+describe("SPEC-002-UI-20260825-22 · messages alcance (alcance.* y responseMissingNote)", () => {
+  it("messages.ts incluye los textos clave de `alcance.generate*`", async () => {
+    const msgs = (await readMessages()) as {
+      alcance: Record<string, unknown>;
+    };
+    const a = msgs.alcance;
+    expect(a.generate).toBeTypeOf("string");
+    expect(a.generateTitle).toBeTypeOf("string");
+    expect(a.generateSubtitle).toBeTypeOf("string");
+    expect(a.generateSubmit).toBeTypeOf("string");
+    expect(a.generateSubmitting).toBeTypeOf("string");
+    expect(a.generateCancel).toBeTypeOf("string");
+    expect(a.generateSelectTemplate).toBeTypeOf("string");
+    expect(a.generateNoTemplates).toBeTypeOf("string");
+    expect(a.generateLoadingTemplates).toBeTypeOf("string");
+    expect(a.generateTemplateHelp).toBeTypeOf("string");
+    expect(a.generateSourceLabel).toBeTypeOf("string");
+    expect(a.generateError).toBeTypeOf("string");
+    expect(a.generateSuccess).toBeTypeOf("string");
+    expect(a.generateOpenLink).toBeTypeOf("string");
+    expect(a.responseMissingNote).toBeTypeOf("string");
+  });
+  it("messages.ts incluye los textos del detalle real del alcance", async () => {
+    const msgs = (await readMessages()) as {
+      alcance: Record<string, unknown>;
+    };
+    const a = msgs.alcance;
+    expect(a.statusLabel).toBeTypeOf("string");
+    expect(a.versionLabel).toBeTypeOf("string");
+    expect(a.templateLabel).toBeTypeOf("string");
+    expect(a.questionnaireResponseLabel).toBeTypeOf("string");
+    expect(a.blocksTitle).toBeTypeOf("string");
+    expect(a.blockIncluded).toBeTypeOf("string");
+    expect(a.blockExcluded).toBeTypeOf("string");
+    expect(a.blockDeliverables).toBeTypeOf("string");
+    expect(a.blockAssumptions).toBeTypeOf("string");
+    expect(a.blockDependencies).toBeTypeOf("string");
+    expect(a.blockAcceptanceCriteria).toBeTypeOf("string");
+    expect(a.emptyBlock).toBeTypeOf("string");
+    expect(a.statusDraft).toBeTypeOf("string");
+    expect(a.statusInReview).toBeTypeOf("string");
+    expect(a.statusSigned).toBeTypeOf("string");
+    expect(a.noBlocks).toBeTypeOf("string");
+  });
+});
+
+/**
+ * SPEC-002-UI-20260825-22 · Detalle real del alcance (alcance.byId).
+ * Reemplaza el placeholder anterior por lectura del documento vía
+ * tRPC. Lee los 6 bloques del jsonb de `content` y los muestra de
+ * forma segura.
+ */
+describe("SPEC-002-UI-20260825-22 · AlcanceDetail lee alcance.byId y muestra los 6 bloques", () => {
+  it("invoca el query real alcance.byId (no UUID dummy, no acceso a BD directa)", () => {
+    const src = readAlcanceDetail();
+    expect(/comercial\.alcance\.byId\.useQuery/.test(src)).toBe(true);
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+  });
+  it("renderiza id, status, version, prospect, template, questionnaireResponseId", () => {
+    const src = readAlcanceDetail();
+    expect(/alcance-detail-id/.test(src)).toBe(true);
+    expect(/alcance-detail-status/.test(src)).toBe(true);
+    expect(/alcance-detail-version/.test(src)).toBe(true);
+    expect(/alcance-detail-template/.test(src)).toBe(true);
+    expect(/alcance-detail-questionnaire/.test(src)).toBe(true);
+    // status label del draft (BR-N52, BR-N231).
+    expect(/statusDraft/.test(src)).toBe(true);
+    expect(/statusInReview/.test(src)).toBe(true);
+    expect(/statusSigned/.test(src)).toBe(true);
+  });
+  it("lee los 6 bloques: included, excluded, deliverables, assumptions, clientDependencies, acceptanceCriteria", () => {
+    const src = readAlcanceDetail();
+    expect(/blocks\.included/.test(src)).toBe(true);
+    expect(/blocks\.excluded/.test(src)).toBe(true);
+    expect(/blocks\.deliverables/.test(src)).toBe(true);
+    expect(/blocks\.assumptions/.test(src)).toBe(true);
+    expect(/blocks\.clientDependencies/.test(src)).toBe(true);
+    expect(/blocks\.acceptanceCriteria/.test(src)).toBe(true);
+    // Cada bloque tiene un data-testid accesible.
+    expect(/alcance-block-included/.test(src)).toBe(true);
+    expect(/alcance-block-excluded/.test(src)).toBe(true);
+    expect(/alcance-block-deliverables/.test(src)).toBe(true);
+    expect(/alcance-block-assumptions/.test(src)).toBe(true);
+    expect(/alcance-block-dependencies/.test(src)).toBe(true);
+    expect(/alcance-block-acceptance/.test(src)).toBe(true);
+  });
+  it("no agrega edición ni firma (corte read-only)", () => {
+    const src = readAlcanceDetail();
+    // No debe invocar mutaciones de sign/submitForReview.
+    expect(src).not.toMatch(/alcance\.sign\.useMutation/);
+    expect(src).not.toMatch(/alcance\.submitForReview\.useMutation/);
+    // Sigue siendo read-only (no inputs editables).
+    expect(src).not.toMatch(/<input[^>]*type="text"/);
+  });
+});

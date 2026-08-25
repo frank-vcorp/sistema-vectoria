@@ -49,7 +49,13 @@ interface CalificarProspectoDialogProps {
   prospectId: string;
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  onSuccess?: () => void;
+  /**
+   * SPEC-002-UI-20260825-22 · Se invoca cuando `submitResponse` y
+   * `prospectos.qualify` finalizan con éxito. Recibe el `responseId`
+   * REAL devuelto por `submitResponse` (no UUID dummy) para que la
+   * página de detalle habilite la acción "Generar alcance".
+   */
+  onSuccess?: (info: { responseId: string }) => void;
 }
 
 /** Estructura flexible de opciones en `questionnaire_questions.options`. */
@@ -139,6 +145,10 @@ export function CalificarProspectoDialog({
   const [presupuestoMxn, setPresupuestoMxn] = React.useState("");
   const [projectType, setProjectType] = React.useState("");
   const [submitError, setSubmitError] = React.useState<string | null>(null);
+  // SPEC-002-UI-20260825-22 · responseId REAL devuelto por
+  // `submitResponse`; se conserva en memoria de la página (no en
+  // schema del prospecto) hasta que el padre lo lea vía onSuccess.
+  const lastResponseIdRef = React.useRef<string | null>(null);
 
   const questionsQ = trpc.comercial.cuestionarios.listQuestions.useQuery(
     { questionnaireId },
@@ -154,6 +164,7 @@ export function CalificarProspectoDialog({
       setPresupuestoMxn("");
       setProjectType("");
       setSubmitError(null);
+      lastResponseIdRef.current = null;
     }
   }, [open]);
 
@@ -196,8 +207,11 @@ export function CalificarProspectoDialog({
       setSubmitError(null);
       void utils.clientes.prospectos.byId.invalidate({ prospectId });
       void utils.clientes.prospectos.list.invalidate();
+      const responseId = lastResponseIdRef.current;
       onOpenChange(false);
-      onSuccess?.();
+      if (responseId) {
+        onSuccess?.({ responseId });
+      }
     },
     onError: (err) => {
       const code = err.data?.code ?? null;
@@ -282,7 +296,20 @@ export function CalificarProspectoDialog({
         ...(projectTypeValue !== undefined ? { projectType: projectTypeValue } : {}),
       },
       {
-        onSuccess: () => {
+        onSuccess: (response) => {
+          // SPEC-002-UI-20260825-22 · captura el id REAL de la
+          // respuesta; nunca UUID dummy.
+          const responseId =
+            response && typeof response === "object" && "id" in response
+              ? (response as { id: string }).id
+              : null;
+          if (!responseId) {
+            setSubmitError(
+              messages.prospectos.form.errors.createFailed,
+            );
+            return;
+          }
+          lastResponseIdRef.current = responseId;
           qualifyMutation.mutate({ prospectId, questionnaireId });
         },
       },

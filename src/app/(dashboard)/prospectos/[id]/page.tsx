@@ -23,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CalificarProspectoDialog } from "@/modules/clientes/prospectos/calificar-prospecto-dialog";
+import { GenerarAlcanceDialog } from "@/modules/clientes/prospectos/generar-alcance-dialog";
 
 /**
  * Detalle de prospecto (SPEC-002). Carga por id y expone las acciones
@@ -43,7 +44,7 @@ import { CalificarProspectoDialog } from "@/modules/clientes/prospectos/califica
  * Promise) y React 18.3 no expone `React.use`. Tratarlo como objeto
  * evita la excepción cliente "Application error" en staging.
  */
-type ActionDialog = null | "lost" | "suspended" | "qualify";
+type ActionDialog = null | "lost" | "suspended" | "qualify" | "alcance";
 
 export default function ProspectoDetallePage({
   params,
@@ -61,6 +62,23 @@ export default function ProspectoDetallePage({
   const [qualifySuccess, setQualifySuccess] = React.useState<string | null>(
     null,
   );
+  /**
+   * SPEC-002-UI-20260825-22 · Id REAL de la respuesta del
+   * cuestionario devuelto por `submitResponse`. Se conserva sólo en
+   * memoria de la página (no en schema del prospecto) por lo que
+   * tras una recarga se pierde y la acción "Generar alcance" no
+   * aparece. Ver `messages.alcance.responseMissingNote` para el
+   * mensaje neutro.
+   */
+  const [questionnaireResponseId, setQuestionnaireResponseId] = React.useState<
+    string | null
+  >(null);
+  /** Datos REALES del draft creado por `alcance.generateDraft`. */
+  const [createdScope, setCreatedScope] = React.useState<{
+    id: string;
+    status: string;
+    version: number;
+  } | null>(null);
 
   // Catálogo publicado para habilitar el botón Calificar (sin UUIDs dummy).
   const cuestionariosList = trpc.comercial.cuestionarios.list.useQuery();
@@ -150,6 +168,7 @@ export default function ProspectoDetallePage({
     setReasonError(null);
     setActionError(null);
     if (target !== "qualify") setQualifySuccess(null);
+    if (target !== "alcance") setCreatedScope(null);
     setDialog(target);
   }
 
@@ -269,6 +288,24 @@ export default function ProspectoDetallePage({
             >
               {messages.prospectos.qualify}
             </Button>
+            {/*
+              SPEC-002-UI-20260825-22 · Acción "Generar alcance".
+              Sólo se muestra cuando el prospecto está calificado Y se
+              conserva en memoria el `questionnaireResponseId` REAL
+              devuelto por `submitResponse`. Sin recargar la página,
+              el id persiste; tras recargar se pierde por diseño
+              (no cambiamos schema; ver §Riesgo del handoff).
+            */}
+            {p.status === "calificado" && questionnaireResponseId ? (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => openDialog("alcance")}
+                data-testid="prospecto-generar-alcance-button"
+              >
+                {messages.alcance.generate}
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="sm"
@@ -310,13 +347,60 @@ export default function ProspectoDetallePage({
           ) : null}
 
           {qualifySuccess ? (
-            <p
-              role="status"
-              className="text-sm text-emerald-700"
+            <div
+              className="space-y-1"
               data-testid="prospecto-qualify-success"
             >
-              {qualifySuccess}
+              <p role="status" className="text-sm text-emerald-700">
+                {qualifySuccess}
+              </p>
+              {questionnaireResponseId ? (
+                <p className="text-xs text-muted-foreground">
+                  {messages.alcance.generate}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/*
+            SPEC-002-UI-20260825-22 · Aviso neutro cuando la página
+            se recarga y no hay responseId en memoria (no inventamos
+            IDs ni endpoints; la SPEC-003 no persiste aún el id de
+            respuesta en el prospecto).
+          */}
+          {p.status === "calificado" && !questionnaireResponseId ? (
+            <p
+              role="note"
+              className="text-xs text-muted-foreground"
+              data-testid="prospecto-alcance-missing-response"
+            >
+              {messages.alcance.responseMissingNote}
             </p>
+          ) : null}
+
+          {createdScope ? (
+            <div
+              className="space-y-1"
+              data-testid="prospecto-alcance-success"
+            >
+              <p role="status" className="text-sm text-emerald-700">
+                {messages.alcance.generateSuccess}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {messages.alcance.idLabel}:{" "}
+                <span className="font-mono">{createdScope.id}</span> ·{" "}
+                {messages.alcance.statusLabel}: {createdScope.status} ·{" "}
+                {messages.alcance.versionLabel}: {createdScope.version}
+              </p>
+              <Button asChild variant="link" size="sm" className="h-auto p-0">
+                <Link
+                  href={`/comercial/alcance/${createdScope.id}`}
+                  data-testid="prospecto-alcance-detail-link"
+                >
+                  {messages.alcance.generateOpenLink}
+                </Link>
+              </Button>
+            </div>
           ) : null}
 
           {actionError ? (
@@ -409,8 +493,39 @@ export default function ProspectoDetallePage({
         onOpenChange={(next) => {
           if (!next) setDialog(null);
         }}
-        onSuccess={() => {
+        onSuccess={(info) => {
+          // SPEC-002-UI-20260825-22 · Propaga el `responseId` REAL
+          // (nunca UUID dummy) al detalle del prospecto. La página
+          // lo conserva en memoria para habilitar la acción
+          // "Generar alcance".
+          if (info?.responseId) {
+            setQuestionnaireResponseId(info.responseId);
+          }
+          setCreatedScope(null);
           setQualifySuccess(messages.prospectos.qualifyDialog.success);
+        }}
+      />
+
+      <GenerarAlcanceDialog
+        questionnaireResponseId={
+          dialog === "alcance" ? questionnaireResponseId : null
+        }
+        prospectCode={p.code}
+        open={dialog === "alcance"}
+        onOpenChange={(next) => {
+          if (!next) setDialog(null);
+        }}
+        onSuccess={(scope) => {
+          // SPEC-002-UI-20260825-22 · Recibe el `ScopeDraftDTO`
+          // REAL; nunca inventamos IDs. Tras generar, conservamos
+          // el id localmente para enlazar al detalle.
+          if (scope?.id) {
+            setCreatedScope({
+              id: scope.id,
+              status: scope.status,
+              version: scope.version,
+            });
+          }
         }}
       />
     </div>
