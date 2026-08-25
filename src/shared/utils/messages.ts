@@ -285,6 +285,32 @@ export const messages = {
       mensualidades: "Mensualidades",
       suscripcion: "Suscripción",
     },
+    // IMPL-20260825-29 · Acción "Crear proyecto" desde OS autorizada
+    // (SPEC-20260817-005 · project_creation universal, BR-N407/68).
+    // Sólo visible cuando `o.status === "authorized_to_start"`; el PL
+    // es el de la propia OS (el backend lo resuelve; la UI NO pide un
+    // UUID manual). Sin prompt() ni acceso directo a BD.
+    createProjectTitle: "Crear proyecto",
+    createProjectSubtitle:
+      "El proyecto nace al ejecutar `project_creation` con el PL que el backend ya validó en la OS. Esta acción es irreversible (BR-N407).",
+    createProjectAction: "Crear proyecto",
+    createProjectSubmitting: "Creando proyecto…",
+    createProjectHelp:
+      "Sólo se muestra cuando la OS está en `authorized_to_start`. En cualquier otro estado no se ofrece acción.",
+    createProjectSuccessTitle: "Proyecto creado",
+    createProjectSuccessBody:
+      "Proyecto {code} creado a partir de esta OS (estado {stage} · {situation}).",
+    createProjectViewProject: "Abrir detalle del proyecto",
+    createProjectErrorExisting:
+      "Esta OS ya tiene un proyecto asociado (idempotencia: no se duplica).",
+    createProjectErrorNotAuthorized:
+      "La OS debe estar en `authorized_to_start` para crear el proyecto.",
+    createProjectErrorMissingPL:
+      "La OS no tiene PL asignado; asígnalo antes de crear el proyecto.",
+    createProjectErrorForbidden:
+      "No tienes permisos para crear proyectos (gestionar_proyectos).",
+    createProjectErrorGeneric:
+      "No fue posible crear el proyecto a partir de la OS.",
   },
   cuestionarios: {
     title: "Cuestionarios",

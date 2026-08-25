@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { messages } from "@/shared/utils";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,26 @@ const STATUS_LABELS: Record<string, string> = {
   closed: messages.ordenes.closed,
   paused: messages.ordenes.paused,
   cancelled: messages.ordenes.cancelled,
+};
+
+// IMPL-20260825-29 · Etiquetas canónicas de etapa/situación del
+// Proyecto (SPEC-20260817-005). Sólo se usan en el bloque de éxito
+// de `createProject` para mostrar el `project.statusStage` y
+// `project.statusSituation` reales devueltos por el backend.
+const STATUS_LABELS_PROJECT_STAGE: Record<string, string> = {
+  planning: messages.proyectos.stageLabel.planning,
+  development: messages.proyectos.stageLabel.development,
+  testing: messages.proyectos.stageLabel.testing,
+  client_validation: messages.proyectos.stageLabel.client_validation,
+  delivery: messages.proyectos.stageLabel.delivery,
+};
+
+const STATUS_LABELS_PROJECT_SITUATION: Record<string, string> = {
+  pending: messages.proyectos.situationLabel.pending,
+  active: messages.proyectos.situationLabel.active,
+  paused: messages.proyectos.situationLabel.paused,
+  completed: messages.proyectos.situationLabel.completed,
+  cancelled: messages.proyectos.situationLabel.cancelled,
 };
 
 function fmtMXN(cents: number): string {
@@ -57,10 +78,76 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
     onSuccess: () => utils.ordenServicio.byId.invalidate({ orderId: id }),
   });
 
+  // IMPL-20260825-29 · Crear Proyecto desde una OS `authorized_to_start`.
+  // El contrato `proyectos.createFromOrder({ orderId })` recibe el UUID
+  // real de la OS (`o.id`) y resuelve el PL desde la OS en el servicio
+  // (BR-N407). La UI NO pide un UUID manual ni abre prompt(). En
+  // cualquier otro estado el botón no se renderiza, evitando una acción
+  // falsa. En éxito se invalida el detalle/listado de proyectos y el
+  // detalle de la OS para que el padre observe los cambios.
+  const createProject = trpc.proyectos.createFromOrder.useMutation({
+    onError: (err) => {
+      setCreatedProject(null);
+      const code = err.data?.code ?? null;
+      if (code === "PROJECT_ALREADY_EXISTS_FOR_ORDER") {
+        setCreateProjectError(messages.ordenes.createProjectErrorExisting);
+        return;
+      }
+      if (code === "ORDER_NOT_AUTHORIZABLE") {
+        setCreateProjectError(messages.ordenes.createProjectErrorNotAuthorized);
+        return;
+      }
+      if (code === "PL_NOT_ASSIGNED") {
+        setCreateProjectError(messages.ordenes.createProjectErrorMissingPL);
+        return;
+      }
+      if (code === "FORBIDDEN" || code === "UNAUTHORIZED") {
+        setCreateProjectError(messages.ordenes.createProjectErrorForbidden);
+        return;
+      }
+      setCreateProjectError(
+        err.message ?? messages.ordenes.createProjectErrorGeneric,
+      );
+    },
+    onSuccess: async (project) => {
+      setCreateProjectError(null);
+      setCreatedProject({
+        id: project.id,
+        code: project.code,
+        statusStage: project.statusStage,
+        statusSituation: project.statusSituation,
+      });
+      // Refresca el detalle de la OS (por si la transición secundaria
+      // toca estado), el detalle del proyecto creado (para quien lo
+      // abra desde el enlace) y el listado de proyectos.
+      await Promise.all([
+        utils.ordenServicio.byId.invalidate({ orderId: id }),
+        utils.proyectos.byId.invalidate({ projectId: project.id }),
+        utils.proyectos.list.invalidate(),
+      ]);
+    },
+  });
+
   const [plUserId, setPlUserId] = React.useState("");
   const [pauseReason, setPauseReason] = React.useState("");
   const [cancelReason, setCancelReason] = React.useState("");
   const [directorReason, setDirectorReason] = React.useState("");
+  // IMPL-20260825-29 · Estado local del resultado `createFromOrder`.
+  // Se conserva sólo en memoria: tras una recarga del componente el
+  // padre vuelve a evaluar `o.status` para decidir si mantiene la
+  // acción (no se inventa `projectId`).
+  const [createdProject, setCreatedProject] = React.useState<
+    | {
+        id: string;
+        code: string;
+        statusStage: string;
+        statusSituation: string;
+      }
+    | null
+  >(null);
+  const [createProjectError, setCreateProjectError] = React.useState<
+    string | null
+  >(null);
 
   if (detail.isLoading) {
     return (
@@ -287,6 +374,101 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
           ) : null}
         </CardContent>
       </Card>
+
+      {/* IMPL-20260825-29 · Crear Proyecto desde OS autorizada
+          (SPEC-20260817-005 · project_creation universal, BR-N407).
+          Sólo se renderiza cuando `o.status === "authorized_to_start"`;
+          en cualquier otro estado la UI NO muestra acción falsa. El
+          backend (`proyectos.createFromOrder`) valida que la OS esté
+          en `authorized_to_start` y que tenga PL asignado, de modo que
+          la UI sólo dispara la mutación y mapea los códigos canónicos. */}
+      {o.status === "authorized_to_start" ? (
+        <Card data-testid="orden-detail-create-project">
+          <CardHeader>
+            <CardTitle>{messages.ordenes.createProjectTitle}</CardTitle>
+            <CardDescription>
+              {messages.ordenes.createProjectSubtitle}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-xs text-muted-foreground">
+              {messages.ordenes.createProjectHelp}
+            </p>
+            <Button
+              type="button"
+              onClick={() => {
+                setCreateProjectError(null);
+                if (createProject.isPending || createdProject) return;
+                // `orderId` es el UUID real de la OS (`o.id`). El PL
+                // lo toma el servicio desde la propia OS, por lo que
+                // la UI no envía `plUserIdOverride`.
+                createProject.mutate({ orderId: o.id });
+              }}
+              disabled={createProject.isPending || !!createdProject}
+              aria-busy={createProject.isPending ? true : undefined}
+              data-testid="orden-detail-create-project-action"
+            >
+              {createProject.isPending
+                ? messages.ordenes.createProjectSubmitting
+                : messages.ordenes.createProjectAction}
+            </Button>
+            {createProjectError ? (
+              <p
+                role="alert"
+                className="text-sm text-destructive"
+                data-testid="orden-detail-create-project-error"
+              >
+                {createProjectError}
+              </p>
+            ) : null}
+            {createdProject ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mt-2 rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900"
+                data-testid="orden-detail-create-project-success"
+              >
+                <p className="font-medium">
+                  {messages.ordenes.createProjectSuccessTitle}
+                </p>
+                <p className="mt-1">
+                  {messages.ordenes.createProjectSuccessBody
+                    .replace("{code}", createdProject.code)
+                    .replace("{stage}", STATUS_LABELS_PROJECT_STAGE[createdProject.statusStage] ?? createdProject.statusStage)
+                    .replace("{situation}", STATUS_LABELS_PROJECT_SITUATION[createdProject.statusSituation] ?? createdProject.statusSituation)}
+                </p>
+                <p className="mt-1">
+                  <span className="text-muted-foreground">ID: </span>
+                  <span
+                    className="font-mono"
+                    data-testid="orden-detail-create-project-success-id"
+                  >
+                    {createdProject.id}
+                  </span>
+                </p>
+                <p className="mt-1">
+                  <span className="text-muted-foreground">Código: </span>
+                  <span
+                    className="font-mono"
+                    data-testid="orden-detail-create-project-success-code"
+                  >
+                    {createdProject.code}
+                  </span>
+                </p>
+                <p className="mt-2">
+                  <Link
+                    href={`/proyectos/${createdProject.id}`}
+                    className="underline"
+                    data-testid="orden-detail-create-project-success-link"
+                  >
+                    {messages.ordenes.createProjectViewProject}
+                  </Link>
+                </p>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Cierre administrativo */}
       {o.status === "delivered" || o.status === "in_execution" ? (
