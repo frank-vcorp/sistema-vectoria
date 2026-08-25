@@ -7,6 +7,42 @@
 
 ---
 
+## FND-20260824-04 · SPEC-002 no permite iniciar el flujo desde UI
+
+**Tipo:** `FINDING` · **Estado:** `confirmed` · **Severidad:** P0 funcional
+
+**Evidencia:** en staging autenticado como Director, `/prospectos` muestra `Total: 0`, buscador y tabla vacía, pero no ofrece acción `Nuevo prospecto` ni formulario de alta. El backend sí tiene `clientes.prospectos.create`, mientras la página de detalle sólo lee un prospecto existente. La propia lista documenta que la creación vive en el detalle, pero ese detalle no implementa creación.
+
+**Impacto:** no se puede iniciar el flujo comercial principal; el sistema no es operable desde prospecto nuevo.
+
+## FND-20260824-05 · Tema claro no visible en la captura inicial
+
+**Tipo:** `FINDING` · **Estado:** `superseded-by-evidence` · **Severidad:** P3 UX
+
+**Evidencia inicial:** la captura de staging muestra la interfaz en tema oscuro y el control de tema no aparece operable en la barra visible.
+
+**Verificación Playwright (2026-08-24):** `/prospectos` inicia con `html.light`, fondo `rgb(255,255,255)` y dos botones `Cambiar a tema oscuro`; al hacer click cambia a `html.dark`, fondo `rgb(10,31,67)`, persiste `localStorage.theme=dark` y los botones pasan a `Cambiar a tema claro`. El comportamiento del toggle sí funciona; la captura reflejaba una preferencia oscura persistida o un estado visual previo.
+
+**Impacto corregido:** no bloquea el flujo; queda como mejora de visibilidad/descubribilidad si el botón no resulta evidente en la composición visual.
+
+## FND-20260824-06 · Rutas dashboard renderizan sin sesión Playwright
+
+**Tipo:** `FINDING` · **Estado:** `confirmed` · **Severidad:** P1 seguridad/UX
+
+**Evidencia:** un contexto Playwright nuevo, sin `storageState`, cookies ni login, abrió directamente `/`, `/dashboard`, `/prospectos`, `/clientes`, Comercial, OS, Proyectos, Facturación, Cobranza, Finanzas, Administración, Auditoría y Bitácora con HTTP 200 y renderizó la shell/navegación. Las consultas protegidas devolvieron estados vacíos o mensajes de acceso, pero la ruta no redirigió a `/login`.
+
+**Impacto:** el usuario puede ver la estructura completa de la aplicación sin autenticarse; debe distinguirse entre shell pública intencional y protección de página requerida por SPEC-001. El flujo funcional autenticado no puede declararse cerrado hasta comprobar el guard de rutas y una sesión Director real.
+
+## FND-20260824-07 · Cobertura anterior validó shells, no el journey de negocio
+
+**Tipo:** `FINDING` · **Estado:** `confirmed` · **Severidad:** P0 de proceso/producto
+
+**Causa:** la implementación existente dejó servicios tRPC y páginas de estado/prerrequisito, pero no una vertical slice operable. `clientes.prospectos.create` existe en backend; `ProspectosList` sólo lista y declara que la creación vive en el detalle, pero `prospectos/[id]` sólo consulta y muestra lectura. Comercial, OS y Proyectos muestran módulos y condiciones previas, no acciones encadenadas.
+
+**Por qué pasó:** la validación anterior usó tests unitarios y Playwright de presencia/navegación (`30/30 PASS`), no un escenario E2E con datos que ejecutara `prospecto → cuestionario → alcance → cotización → aceptación → OS → proyecto`. El estado `DONE (staging-verificado)` fue sobredeclarado respecto al producto funcional.
+
+**Determinación:** el siguiente incremento debe ser una vertical slice E2E con datos de staging controlados; no se acepta otro cierre basado sólo en HTTP 200, headings o páginas vacías.
+
 ## FND-20260824-03 · Coolify REST omite logs de build en la respuesta observada
 
 **Tipo:** `FINDING` · **Estado:** `confirmed` · **Severidad:** P1 para observabilidad V3

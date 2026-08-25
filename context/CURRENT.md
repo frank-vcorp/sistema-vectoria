@@ -70,6 +70,17 @@
 - Deployment final: `b5w5roar7wngcpnbmlzkfdxc`, `finished`, SHA `4187aaa3984a012ca720ced4ac615ea4b617c35a`; aplicación `running:healthy`.
 - V3 staging: Playwright dirigido `30/30 PASS` en mobile-375, tablet-768 y desktop-1280 (11.3 s).
 - Estado del incremento: `DONE (staging-verificado)`; queda gate GEMINI por la política global de retry de React Query, sin bloqueador funcional observado.
+
+## Reapertura funcional por evidencia de Frank · 2026-08-24 20:06 MDT
+
+- La clasificación anterior `DONE (staging-verificado)` queda limitada a la batería Playwright existente y **no representa producto funcional completo**.
+- Evidencia nueva: como Director, `/prospectos` muestra lista vacía sin CTA/formulario `Nuevo prospecto`; el backend `clientes.prospectos.create` existe, pero la UI no permite iniciar el flujo. `FND-20260824-04` P0.
+- Auditoría Playwright en contexto nuevo sin login: todas las rutas de dashboard renderizan shell HTTP 200 sin redirigir a `/login`; las queries protegidas quedan vacías. `FND-20260824-06` P1 seguridad/UX; requiere verificar guard de rutas antes de declarar flujo autenticado completo.
+- Verificación Playwright adicional: el tema claro sí funciona; `/prospectos` inicia en `html.light` y click en cualquiera de los dos `ThemeToggle` cambia a `html.dark`, fondo navy y persiste `localStorage.theme=dark`. `FND-20260824-05` queda superseded-by-evidence/P3; la captura mostraba preferencia oscura persistida.
+- Estado real del producto: `BLOCKED (flujo comercial no iniciable)`; deployment Coolify sigue `running:healthy`.
+- Siguiente incremento: UI funcional de alta de prospecto + tema claro verificable; después recorrido Comercial → OS → Proyecto hasta cierre técnico, con V3 por cada corte y un gate final completo.
+- Simulación Playwright solicitada por Frank: `test-results/flow-prospecto-proyecto-20260824/flow-report.json` y capturas `01` a `06`. Resultado: bloqueado en etapa 01; no existe CTA/formulario de alta de prospecto. Las etapas 02–06 sólo pudieron capturarse como estados vacíos/bloqueados (`cuestionarios=0`, alcance requiere prospecto calificado, cotización requiere alcance firmado, OS=0, proyectos=0).
+- Causa raíz de proceso: la validación anterior certificó shell/navegación y contratos unitarios, no un journey E2E con datos. `FND-20260824-07` reabre el producto; no se vuelve a declarar DONE hasta ejecutar el flujo completo con capturas y estados persistidos.
 - Clasificación V3: los fallos de headings (`CardTitle` renderiza `div`) y el error cliente del detalle `/clientes/{id}` son `IMPLEMENTATION_DEFECT` dentro de SPEC-002; no hay evidencia de un gap funcional ni de infraestructura.
 
 **DOC-20260824-09** · CRONISTA · 2026-08-24 · Transición material `SPEC-002-V3-20260824-01`: `VERIFYING` → `DONE (staging-verificado)`. Evidencia: IMPL-20260824-20, QA-20260824-09-SPEC-002-V3-20260824-01 `PASS_WITH_WARNINGS`, commit `4187aaa3984a012ca720ced4ac615ea4b617c35a`, deployment `b5w5roar7wngcpnbmlzkfdxc` `finished`, app `running:healthy`, SHA verificado, Playwright `30/30 PASS`. Warnings P3 conservados: (P3-1) compatibilidad futura Next 15, (P3-2) posible salto global headings `CardTitle`, (P3-3) selector E2E no fuerza toggle visible. No commit/push.

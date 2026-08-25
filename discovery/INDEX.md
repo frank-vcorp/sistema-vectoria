@@ -26,6 +26,10 @@ El discovery funcional está consolidado, sin contradicciones P0 ni preguntas bl
 | `HALLAZGOS.md` § FND-20260824-01 | Inventario dirigido del cutover legacy→runtime | candidate; gate de implementación |
 | `HALLAZGOS.md` § FND-20260824-02 | Drift contrato Coolify observado→runner | candidate; P0 V3; requiere decisión técnica |
 | `HALLAZGOS.md` § FND-20260824-03 | REST Coolify omite logs de build en la respuesta observada | confirmed; P1 observabilidad V3 |
+| `HALLAZGOS.md` § FND-20260824-04 | SPEC-002 no permite alta de prospecto desde UI | confirmed; P0 funcional |
+| `HALLAZGOS.md` § FND-20260824-05 | Tema claro no visible en la captura inicial | superseded-by-evidence; P3 UX |
+| `HALLAZGOS.md` § FND-20260824-06 | Rutas dashboard renderizan sin sesión Playwright | confirmed; P1 seguridad/UX |
+| `HALLAZGOS.md` § FND-20260824-07 | Cobertura anterior validó shells, no el journey de negocio | confirmed; P0 proceso/producto |
 
 ---
 

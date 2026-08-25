@@ -49,6 +49,9 @@ export const messages = {
     qualify: "Marcar como calificado",
     qualifyNeedsQuestionnaire:
       "Para calificar el prospecto se requiere un cuestionario vinculado (SPEC-003).",
+    qualifyBlockedTitle: "Calificación bloqueada",
+    qualifyBlockedBody:
+      "No hay cuestionarios publicados disponibles para calificar al prospecto (BR-N148). Esta acción requiere SPEC-003.",
     markLost: "Marcar como perdido",
     markSuspended: "Suspender",
     reactivate: "Reactivar",
@@ -58,11 +61,59 @@ export const messages = {
     code: "Código",
     name: "Nombre",
     company: "Empresa",
+    email: "Correo electrónico",
+    phone: "Teléfono",
     source: "Origen",
     medium: "Medio de contacto",
+    mediumPlaceholder: "Selecciona un medio",
     assignedTo: "Asignado a",
     status: "Estado",
     nextAction: "Próxima acción",
+    // Formulario de alta (SPEC-002 AC-1 + AC-9 responsive 375/768/1280).
+    form: {
+      title: "Alta de prospecto",
+      subtitle:
+        "Crea una oportunidad nueva. El código es único por organización (BR-N216).",
+      codeHint: "Solo letras, dígitos, guion y guion bajo (1-32 caracteres).",
+      nameHint: "Nombre del contacto o de la oportunidad.",
+      companyHint: "Empresa del contacto (opcional).",
+      emailHint: "Correo de contacto (opcional).",
+      phoneHint: "Teléfono de contacto (opcional).",
+      sourceHint: "Origen del prospecto (opcional).",
+      mediumHint: "Medio por el que se contactó (opcional).",
+      submit: "Crear prospecto",
+      submitting: "Creando…",
+      cancel: "Cancelar",
+      success: "Prospecto creado.",
+      errors: {
+        requiredCode: "El código es obligatorio.",
+        requiredName: "El nombre es obligatorio.",
+        invalidCode:
+          "El código solo admite letras, dígitos, guion y guion bajo (1-32 caracteres).",
+        invalidEmail: "Correo electrónico inválido.",
+        duplicateCode:
+          "Ya existe un prospecto con ese código en tu organización.",
+        createFailed: "No fue posible crear el prospecto.",
+        codeServer: "Código duplicado por organización.",
+        reasonRequired:
+          "El motivo es obligatorio (mínimo 3 caracteres).",
+        reasonMinLength: "Mínimo 3 caracteres.",
+      },
+    },
+    // Acciones de terminal/suspensión en línea (sin window.prompt).
+    actions: {
+      title: "Acciones",
+      subtitle:
+        "Calificar, marcar perdido/suspendido o reactivar. Las razones son obligatorias (BR-N213/214).",
+      markLostTitle: "Marcar como perdido",
+      markSuspendedTitle: "Suspender",
+      reactivateTitle: "Reactivar",
+      reactivateBody:
+        "El prospecto volverá al estado \"contactado\" conservando el historial de suspensión (BR-N214).",
+      confirm: "Confirmar",
+      cancel: "Cancelar",
+      reasonPlaceholder: "Describe el motivo (≥3 caracteres)",
+    },
   },
   clientes: {
     title: "Clientes",

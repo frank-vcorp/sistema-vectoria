@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ProspectoForm } from "./prospecto-form";
 
 interface ProspectosListProps {
   scope: "own" | "all";
@@ -25,171 +26,140 @@ function mediumLabel(medium: string | null | undefined): string {
 }
 
 /**
- * Listado de prospectos. Cumple AC-9 (responsive 375/768/1280) y la
- * visibilidad por rol (AC-6): cuando `scope === "own"` la tabla sólo
+ * Listado de prospectos (SPEC-002). Cumple AC-9 (responsive 375/768/1280)
+ * y la visibilidad por rol (AC-6): cuando `scope === "own"` la tabla sólo
  * muestra prospectos asignados al usuario actual (Director/Admin ven
  * todos y reciben `scope: "all"`).
  *
- * La creación/edición vive en `/prospectos/[id]` (detalle + acciones).
- * Esta lista es de lectura y CTA hacia detalle/calificación.
+ * El alta se realiza con el formulario `ProspectoForm` (Dialog). Las
+ * acciones de calificación/pérdida/suspensión/reactivación se ejecutan
+ * desde el detalle `/prospectos/[id]` para mantener contexto y evitar
+ * solapamiento de Dialogs en la lista (cumple SPEC-002 §4.2; el
+ * formulario de calificación real vive en SPEC-003 y aún no expone
+ * cuestionarios por prospecto — ver IMPL-REPORT / SPEC-GAP).
  */
 export function ProspectosList({ scope }: ProspectosListProps) {
   const [search, setSearch] = React.useState("");
+  const [formOpen, setFormOpen] = React.useState(false);
   const utils = trpc.useUtils();
   const query = trpc.clientes.prospectos.list.useQuery({
     limit: 50,
     offset: 0,
     ...(search.length > 0 ? { search } : {}),
   });
-  const qualify = trpc.clientes.prospectos.qualify.useMutation({
-    onSuccess: () => utils.clientes.prospectos.list.invalidate(),
-  });
-  const setLost = trpc.clientes.prospectos.setLost.useMutation({
-    onSuccess: () => utils.clientes.prospectos.list.invalidate(),
-  });
-  const suspend = trpc.clientes.prospectos.setSuspended.useMutation({
-    onSuccess: () => utils.clientes.prospectos.list.invalidate(),
-  });
-  const createClient = trpc.clientes.clientes.createFromProspect.useMutation();
 
   const items = query.data?.items ?? [];
   const total = query.data?.total ?? 0;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{messages.prospectos.title}</CardTitle>
-        <CardDescription>
-          {scope === "all"
-            ? `Total: ${total} (visibilidad: todos)`
-            : `Total: ${total} (visibilidad: propios)`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <div className="flex-1">
-            <Label htmlFor="prospectos-search">Buscar</Label>
-            <Input
-              id="prospectos-search"
-              placeholder="Nombre, código o empresa"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+    <>
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <CardTitle>{messages.prospectos.title}</CardTitle>
+              <CardDescription>
+                {scope === "all"
+                  ? `Total: ${total} (visibilidad: todos)`
+                  : `Total: ${total} (visibilidad: propios)`}
+              </CardDescription>
+            </div>
+            <Button
+              onClick={() => setFormOpen(true)}
+              data-testid="prospectos-new-button"
+              className="shrink-0"
+            >
+              {messages.prospectos.new}
+            </Button>
           </div>
-        </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <Label htmlFor="prospectos-search">Buscar</Label>
+              <Input
+                id="prospectos-search"
+                placeholder="Nombre, código o empresa"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
 
-        {query.isLoading ? (
-          <p className="text-sm text-muted-foreground">{messages.common.loading}</p>
-        ) : items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{messages.prospectos.empty}</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{messages.prospectos.code}</TableHead>
-                  <TableHead>{messages.prospectos.name}</TableHead>
-                  <TableHead className="hidden md:table-cell">
-                    {messages.prospectos.company}
-                  </TableHead>
-                  <TableHead>{messages.prospectos.status}</TableHead>
-                  <TableHead className="hidden sm:table-cell">
-                    {messages.prospectos.medium}
-                  </TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-mono text-xs">{p.code}</TableCell>
-                    <TableCell>
-                      <a
-                        href={`/prospectos/${p.id}`}
-                        className="underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        {p.name}
-                      </a>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {p.company ?? "—"}
-                    </TableCell>
-                    <TableCell>{statusLabel(p.status)}</TableCell>
-                    <TableCell className="hidden sm:table-cell">
-                      {mediumLabel(p.medium)}
-                    </TableCell>
-                    <TableCell className="space-x-1 text-right">
-                      {p.status === "calificado" ? null : (
+          {query.isLoading ? (
+            <p className="text-sm text-muted-foreground">
+              {messages.common.loading}
+            </p>
+          ) : items.length === 0 ? (
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="prospectos-empty"
+            >
+              {messages.prospectos.empty}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{messages.prospectos.code}</TableHead>
+                    <TableHead>{messages.prospectos.name}</TableHead>
+                    <TableHead className="hidden md:table-cell">
+                      {messages.prospectos.company}
+                    </TableHead>
+                    <TableHead>{messages.prospectos.status}</TableHead>
+                    <TableHead className="hidden sm:table-cell">
+                      {messages.prospectos.medium}
+                    </TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell className="font-mono text-xs">{p.code}</TableCell>
+                      <TableCell>
+                        <a
+                          href={`/prospectos/${p.id}`}
+                          className="underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {p.name}
+                        </a>
+                      </TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        {p.company ?? "—"}
+                      </TableCell>
+                      <TableCell>{statusLabel(p.status)}</TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        {mediumLabel(p.medium)}
+                      </TableCell>
+                      <TableCell className="text-right">
                         <Button
+                          asChild
                           size="sm"
                           variant="outline"
-                          disabled={qualify.isPending}
-                          onClick={() =>
-                            qualify.mutate({
-                              prospectId: p.id,
-                              // SPEC-003 emite el cuestionario real; mientras
-                              // no exista, el servicio rechaza con
-                              // QUESTIONNAIRE_REQUIRED. En MVP dejamos un
-                              // id dummy para validar el flujo.
-                              questionnaireId: "00000000-0000-0000-0000-000000000001",
-                            })
-                          }
+                          className="text-xs"
                         >
-                          {messages.prospectos.qualify}
+                          <a href={`/prospectos/${p.id}`}>Abrir</a>
                         </Button>
-                      )}
-                      {p.status === "calificado" ? (
-                        <Button
-                          size="sm"
-                          disabled={createClient.isPending}
-                          onClick={() =>
-                            createClient.mutate({ prospectId: p.id })
-                          }
-                        >
-                          {messages.prospectos.createClient}
-                        </Button>
-                      ) : null}
-                      {p.status !== "perdido" && p.status !== "suspendido" ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={setLost.isPending || suspend.isPending}
-                          onClick={() => {
-                            const reason =
-                              typeof window === "undefined"
-                                ? "sin motivo"
-                                : window.prompt(messages.prospectos.lostReason) ?? "";
-                            if (reason.length >= 3) setLost.mutate({ prospectId: p.id, reason });
-                          }}
-                        >
-                          {messages.prospectos.markLost}
-                        </Button>
-                      ) : null}
-                      {p.status !== "perdido" && p.status !== "suspendido" ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={setLost.isPending || suspend.isPending}
-                          onClick={() => {
-                            const reason =
-                              typeof window === "undefined"
-                                ? "sin motivo"
-                                : window.prompt(messages.prospectos.suspendedReason) ?? "";
-                            if (reason.length >= 3)
-                              suspend.mutate({ prospectId: p.id, reason });
-                          }}
-                        >
-                          {messages.prospectos.markSuspended}
-                        </Button>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <ProspectoForm
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        onCreated={() => {
+          // La invalidación del listado la hace `ProspectoForm` en onSuccess.
+          void utils.clientes.prospectos.list.invalidate();
+        }}
+      />
+    </>
   );
 }

@@ -13,3 +13,11 @@ Las decisiones funcionales abiertas viven exclusivamente en `PREGUNTAS-ABIERTAS.
 - **Hallazgo relacionado:** `FND-20260823-01`.
 - **Pregunta exacta:** ¿Cuál es la lista canónica, ordenada y con identificadores estables de los valores del enum `prospects.medium`?
 - **Resolución:** Frank confirmó sólo tres valores, en orden: `llamada` (Llamada), `email` (Email), `whatsapp` (WhatsApp).
+
+## FLOW-20260824-01 · Flujo integral prospecto → cierre de proyecto
+
+- **Estado:** `blocking` para ejecución V3 en staging.
+- **Solicitud confirmada:** ejecutar el recorrido desde la llegada/alta de un prospecto hasta el fin del proyecto, atravesando los módulos comerciales y operativos aplicables.
+- **Dependencia operativa:** se requiere una cuenta autenticada de staging con permisos suficientes para prospectos, clientes, comercial, órdenes de servicio y proyectos. Las pruebas actuales sólo usan credenciales inválidas y no exponen una cuenta de negocio reutilizable.
+- **Pregunta bloqueante:** ¿qué cuenta/rol de staging se usará para ejecutar el flujo? No registrar ni enviar la contraseña en chat; debe estar disponible mediante sesión autenticada o variable local segura.
+- **Pregunta de alcance:** ¿"fin del proyecto" termina en `cierre técnico`/`delivered`, o incluye también `cierre administrativo de OS`, facturación y cobranza hasta saldo cero?
