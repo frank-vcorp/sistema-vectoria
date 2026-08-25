@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { messages } from "@/shared/utils";
 import { trpc } from "@/lib/trpc";
 import { SignAlcanceDialog } from "./sign-alcance-dialog";
+import { CreateCotizacionDialog } from "@/modules/comercial/cotizaciones/create-cotizacion-dialog";
 
 /** Bloques tal como los produce `generateScopeDraftContent` (helpers.ts). */
 interface ScopeDraftBlocks {
@@ -79,6 +80,7 @@ export function AlcanceDetail({ id }: { id: string }) {
   );
 
   const [signOpen, setSignOpen] = React.useState(false);
+  const [createOpen, setCreateOpen] = React.useState(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
   const submitForReview = trpc.comercial.alcance.submitForReview.useMutation({
@@ -269,13 +271,38 @@ export function AlcanceDetail({ id }: { id: string }) {
             ) : null}
           </CardContent>
         ) : null}
+        {canSubmitForReview || canSign ? (
+          <CardContent className="-mt-2">
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="alcance-detail-create-quote-blocked"
+            >
+              {messages.cotizaciones.createReasonNotSigned}
+            </p>
+          </CardContent>
+        ) : null}
         {isSigned ? (
-          <CardContent>
+          <CardContent className="space-y-2">
             <p
               className="text-xs text-muted-foreground"
               data-testid="alcance-detail-immutable-note"
             >
               {messages.alcance.signImmutableNote}
+            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+              <Button
+                type="button"
+                onClick={() => setCreateOpen(true)}
+                data-testid="alcance-detail-open-create-quote"
+              >
+                {messages.cotizaciones.create}
+              </Button>
+            </div>
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="alcance-detail-create-quote-hint"
+            >
+              {messages.cotizaciones.createReasonSigned}
             </p>
           </CardContent>
         ) : null}
@@ -349,6 +376,13 @@ export function AlcanceDetail({ id }: { id: string }) {
           setSignOpen(false);
           void query.refetch();
         }}
+      />
+
+      <CreateCotizacionDialog
+        scopeId={scope.id}
+        prospectId={scope.prospectId ?? null}
+        open={createOpen}
+        onOpenChange={setCreateOpen}
       />
     </div>
   );

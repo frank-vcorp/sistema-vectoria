@@ -394,6 +394,51 @@ export const messages = {
       "El total ({total}) supera 1.5× el presupuesto declarado ({presupuesto}). Esta es una advertencia informativa.",
     presupuestoWarningNonBlocking:
       "No bloquea la aceptación ni requiere aprobación del Director (DEC-FUN-20260819-73 / BR-N411).",
+    // IMPL-20260825-24 · Crear cotización multi-línea desde alcance firmado.
+    create: "Crear cotización",
+    createReasonSigned: "Disponible ahora que el alcance está firmado.",
+    createReasonNotSigned:
+      "Sólo se puede crear una cotización cuando el alcance está firmado.",
+    createTitle: "Crear cotización multi-línea",
+    createSubtitle:
+      "Selecciona servicios del catálogo activo, ajusta cantidad y precio en MXN y elige el tipo de cobro. La vigencia mínima es de 7 días (BR-N235).",
+    createCatalogLabel: "Servicios del catálogo",
+    createCatalogHelp:
+      "Sólo se listan servicios activos (catalogo.list). Agrega al menos un ítem antes de enviar.",
+    createEmptyCatalog:
+      "No hay servicios activos en el catálogo. Contacta al Director para poblarlo.",
+    createCatalogLoading: "Cargando catálogo…",
+    createAddItem: "Agregar a la cotización",
+    createNoItems: "Aún no has agregado ítems.",
+    createItemDescriptionPlaceholder: "Descripción visible de la línea",
+    createItemQtyPlaceholder: "Cant.",
+    createItemUnitPriceLabel: "Precio unitario (MXN)",
+    createItemUnitPricePlaceholder: "0.00",
+    createItemUnitPriceHint:
+      "Editable en MXN; se guarda en centavos (entero).",
+    createRemoveItem: "Quitar ítem",
+    createTipoCobroLabel: "Tipo de cobro",
+    createTipoCobroHelp:
+      "pago_unico · mensualidades · suscripcion (BR-N238).",
+    createNotesLabel: "Notas (opcional)",
+    createNotesPlaceholder: "Notas internas de la cotización",
+    createValidUntilLabel: "Vigencia hasta",
+    createValidUntilHelp: "Fecha ISO. La vigencia mínima es 7 días (BR-N235).",
+    createMinValidityError:
+      "La vigencia debe ser al menos 7 días desde hoy (BR-N235).",
+    createSubmit: "Crear cotización",
+    createSubmitting: "Creando…",
+    createCancel: "Cancelar",
+    createError: "No fue posible crear la cotización.",
+    createForbidden:
+      "No tienes permisos para crear cotizaciones (gestionar_comercial).",
+    createSignedScopeRequired:
+      "El alcance debe estar firmado antes de crear la cotización (BR-N51).",
+    createSuccessTitle: "Cotización creada",
+    createSuccessBody: "La cotización {code} quedó en estado draft.",
+    createOpenLink: "Abrir detalle de la cotización",
+    createScopeIdMissing:
+      "No se cuenta con el id real del alcance firmado.",
   },
   errors: {
     networkError: "Error de red. Verifica tu conexión.",

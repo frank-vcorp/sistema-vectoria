@@ -483,6 +483,19 @@ function readSignAlcanceDialog(): string {
   return _readFileSync(SIGN_ALCANCE_DIALOG_PATH, "utf8");
 }
 
+const CREATE_COTIZACION_DIALOG_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "modules",
+  "comercial",
+  "cotizaciones",
+  "create-cotizacion-dialog.tsx",
+);
+function readCreateCotizacionDialog(): string {
+  return _readFileSync(CREATE_COTIZACION_DIALOG_PATH, "utf8");
+}
+
 async function readMessages(): Promise<unknown> {
   // Import estático a través del loader TS de Vitest; permite verificar
   // el catálogo de mensajes sin transpilación manual.
@@ -840,5 +853,197 @@ describe("IMPL-20260825-23 · SignAlcanceDialog exige motivo ≥3 y llama alcanc
     // cierra el diálogo y NO reemplaza el resultado con un mensaje
     // sintético local.
     expect(/onSuccess\?\.\(\{[\s\S]*?id:[\s\S]*?status:[\s\S]*?signedAt:[\s\S]*?signedBy:[\s\S]*?signedReason/.test(src)).toBe(true);
+  });
+});
+
+/**
+ * IMPL-20260825-24 · SPEC-003 B7 (alcance firmado → crear cotización
+ * multi-línea real).
+ *
+ * Cubre:
+ *  - messages.cotizaciones.create* (canónicos).
+ *  - AlcanceDetail expone "Crear cotización" sólo en `signed` y
+ *    muestra la razón de bloqueo en draft/in_review (sin UUIDs
+ *    dummy, sin acceso a BD, sin window.prompt).
+ *  - AlcanceDetail monta `CreateCotizacionDialog` con `scopeId`
+ *    y `prospectId` reales.
+ *  - CreateCotizacionDialog:
+ *     · consulta catalogo.list real y filtra `active=true`;
+ *     · permite elegir ≥1 ítem con kind='service',
+ *       catalogServiceId real, qty≥1 y unitPriceCents convertido
+ *       desde MXN;
+ *     · expone tipo de cobro `pago_unico|mensualidades|suscripcion`
+ *       (BR-N238);
+ *     · exige vigencia ≥7 días (BR-N235) en cliente;
+ *     · invoca cotizaciones.create con scopeId/prospectId reales,
+ *       mapéa FORBIDDEN y SIGNED_SCOPE_REQUIRED, y nunca afirma
+ *       éxito: muestra id/code/status reales sólo si el backend
+ *       los entrega.
+ */
+describe("IMPL-20260825-24 · cotizaciones · mensajes create*", () => {
+  it("messages.cotizaciones incluye los textos canónicos del diálogo de alta", async () => {
+    const msgs = (await readMessages()) as {
+      cotizaciones: Record<string, unknown>;
+    };
+    const c = msgs.cotizaciones;
+    expect(c.create).toBeTypeOf("string");
+    expect(c.createReasonSigned).toBeTypeOf("string");
+    expect(c.createReasonNotSigned).toBeTypeOf("string");
+    expect(c.createTitle).toBeTypeOf("string");
+    expect(c.createSubtitle).toBeTypeOf("string");
+    expect(c.createCatalogLabel).toBeTypeOf("string");
+    expect(c.createCatalogHelp).toBeTypeOf("string");
+    expect(c.createEmptyCatalog).toBeTypeOf("string");
+    expect(c.createCatalogLoading).toBeTypeOf("string");
+    expect(c.createAddItem).toBeTypeOf("string");
+    expect(c.createNoItems).toBeTypeOf("string");
+    expect(c.createItemDescriptionPlaceholder).toBeTypeOf("string");
+    expect(c.createItemQtyPlaceholder).toBeTypeOf("string");
+    expect(c.createItemUnitPriceLabel).toBeTypeOf("string");
+    expect(c.createItemUnitPricePlaceholder).toBeTypeOf("string");
+    expect(c.createItemUnitPriceHint).toBeTypeOf("string");
+    expect(c.createRemoveItem).toBeTypeOf("string");
+    expect(c.createTipoCobroLabel).toBeTypeOf("string");
+    expect(c.createTipoCobroHelp).toBeTypeOf("string");
+    expect(c.createNotesLabel).toBeTypeOf("string");
+    expect(c.createNotesPlaceholder).toBeTypeOf("string");
+    expect(c.createValidUntilLabel).toBeTypeOf("string");
+    expect(c.createValidUntilHelp).toBeTypeOf("string");
+    expect(c.createMinValidityError).toBeTypeOf("string");
+    expect(c.createSubmit).toBeTypeOf("string");
+    expect(c.createSubmitting).toBeTypeOf("string");
+    expect(c.createCancel).toBeTypeOf("string");
+    expect(c.createError).toBeTypeOf("string");
+    expect(c.createForbidden).toBeTypeOf("string");
+    expect(c.createSignedScopeRequired).toBeTypeOf("string");
+    expect(c.createSuccessTitle).toBeTypeOf("string");
+    expect(c.createSuccessBody).toBeTypeOf("string");
+    expect(c.createOpenLink).toBeTypeOf("string");
+    expect(c.createScopeIdMissing).toBeTypeOf("string");
+  });
+});
+
+describe("IMPL-20260825-24 · AlcanceDetail expone acción Crear cotización sólo cuando está firmado", () => {
+  it("en `draft` y `in_review` NO expone botón Crear cotización y muestra el motivo de bloqueo", () => {
+    const src = readAlcanceDetail();
+    // La acción está atada a `isSigned` (status === 'signed').
+    expect(/alcance-detail-open-create-quote/.test(src)).toBe(true);
+    // El motivo de bloqueo sólo se renderiza cuando NO está firmado.
+    expect(/alcance-detail-create-quote-blocked/.test(src)).toBe(true);
+    expect(/createReasonNotSigned/.test(src)).toBe(true);
+    // Anti-patrones: nunca UUIDs dummy ni acceso directo a BD ni prompt().
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+  });
+
+  it("en `signed` muestra el botón Crear cotización y el aviso positivo", () => {
+    const src = readAlcanceDetail();
+    // El botón vive dentro de la rama `isSigned` y reusa
+    // messages.cotizaciones.create.
+    expect(/alcance-detail-open-create-quote/.test(src)).toBe(true);
+    expect(/createReasonSigned/.test(src)).toBe(true);
+    expect(/messages\.cotizaciones\.create/.test(src)).toBe(true);
+  });
+
+  it("monta CreateCotizacionDialog con scopeId y prospectId reales (sin UUID dummy)", () => {
+    const src = readAlcanceDetail();
+    expect(/CreateCotizacionDialog/.test(src)).toBe(true);
+    // El scopeId se pasa desde query.data.id (no hardcoded).
+    expect(/scopeId=\{scope\.id\}/.test(src)).toBe(true);
+    // El prospectId se pasa desde el DTO real (con fallback null).
+    expect(/prospectId=\{scope\.prospectId\s*\?\?\s*null\}/.test(src)).toBe(true);
+  });
+});
+
+describe("IMPL-20260825-24 · CreateCotizacionDialog consulta catálogo activo y arma ítems service", () => {
+  it("consulta catalogo.list real (no UUIDs dummy, no acceso a BD directa, no window.prompt)", () => {
+    const src = readCreateCotizacionDialog();
+    expect(/catalogo\.list\.useQuery/.test(src)).toBe(true);
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+  });
+
+  it("filtra por `active` en cliente y avisa si el catálogo está vacío", () => {
+    const src = readCreateCotizacionDialog();
+    expect(/c\.active/.test(src)).toBe(true);
+    expect(/createEmptyCatalog/.test(src)).toBe(true);
+    expect(/create-cotizacion-catalog-empty/.test(src)).toBe(true);
+  });
+
+  it("arma ítems con kind:'service', catalogServiceId real, qty>=1 y unitPriceCents convertido desde MXN", () => {
+    const src = readCreateCotizacionDialog();
+    expect(/kind:\s*["']service["']/.test(src)).toBe(true);
+    expect(/discountCents:\s*0/.test(src)).toBe(true);
+    expect(/sortOrder:\s*idx/.test(src)).toBe(true);
+    expect(/parseMXNToCents/.test(src)).toBe(true);
+    expect(/unitPriceCents/.test(src)).toBe(true);
+  });
+
+  it("expone tipo de cobro pago_unico | mensualidades | suscripcion (BR-N238)", () => {
+    const src = readCreateCotizacionDialog();
+    expect(/"pago_unico"/.test(src)).toBe(true);
+    expect(/"mensualidades"/.test(src)).toBe(true);
+    expect(/"suscripcion"/.test(src)).toBe(true);
+    expect(/TipoCobroSchema|createTipoCobro/.test(src)).toBe(true);
+  });
+
+  it("exige vigencia >=7 días en cliente (BR-N235) y nunca afirma éxito sin id/code reales", () => {
+    const src = readCreateCotizacionDialog();
+    expect(/MIN_VALIDITY_DAYS\s*=\s*7/.test(src)).toBe(true);
+    expect(/addDays\(\s*new Date\(\)\s*,\s*MIN_VALIDITY_DAYS\s*-\s*1\s*\)/.test(src)).toBe(true);
+    expect(/createMinValidityError/.test(src)).toBe(true);
+    // Si el backend no devuelve id o code, NO se afirma éxito: se
+    // expone mensaje canónico de error.
+    expect(/if\s*\(\s*!id\s*\|\|\s*!code\s*\)/.test(src)).toBe(true);
+    expect(/setSubmitError\(messages\.cotizaciones\.createError\)/.test(src)).toBe(true);
+  });
+
+  it("invoca cotizaciones.create con scopeId+prospectId reales (sin UUID dummy)", () => {
+    const src = readCreateCotizacionDialog();
+    expect(/cotizaciones\.create\.useMutation/.test(src)).toBe(true);
+    expect(/createQuote\.mutate\(\s*\{[\s\S]*?prospectId,[\s\S]*?scopeId/.test(src)).toBe(true);
+    expect(/validUntil:\s*localDate\.toISOString\(\)/.test(src)).toBe(true);
+  });
+
+  it("mapea errores de dominio (FORBIDDEN, SIGNED_SCOPE_REQUIRED) a mensajes canónicos con role=alert", () => {
+    const src = readCreateCotizacionDialog();
+    expect(/["']FORBIDDEN["']/.test(src)).toBe(true);
+    expect(/createForbidden/.test(src)).toBe(true);
+    expect(/SIGNED_SCOPE_REQUIRED/.test(src)).toBe(true);
+    expect(/createSignedScopeRequired/.test(src)).toBe(true);
+    expect(/create-cotizacion-submit-error/.test(src)).toBe(true);
+    expect(/role="alert"/.test(src)).toBe(true);
+  });
+
+  it("expone accesibilidad: Label htmlFor + aria-describedby + data-testid por control", () => {
+    const src = readCreateCotizacionDialog();
+    expect(/htmlFor="create-cotizacion-catalog"/.test(src)).toBe(true);
+    expect(/htmlFor="create-cotizacion-tipo-cobro"/.test(src)).toBe(true);
+    expect(/htmlFor="create-cotizacion-valid-until"/.test(src)).toBe(true);
+    expect(/htmlFor="create-cotizacion-notes"/.test(src)).toBe(true);
+    expect(/aria-describedby="create-cotizacion-catalog-help"/.test(src)).toBe(true);
+    expect(/aria-describedby="create-cotizacion-tipo-cobro-help"/.test(src)).toBe(true);
+    expect(/aria-describedby="create-cotizacion-valid-until-help"/.test(src)).toBe(true);
+    expect(/data-testid="create-cotizacion-catalog"/.test(src)).toBe(true);
+    expect(/data-testid="create-cotizacion-add"/.test(src)).toBe(true);
+    expect(/data-testid="create-cotizacion-item-qty"/.test(src)).toBe(true);
+    expect(/data-testid="create-cotizacion-item-price"/.test(src)).toBe(true);
+    expect(/data-testid="create-cotizacion-submit"/.test(src)).toBe(true);
+  });
+
+  it("al éxito expone id/code/status reales del backend y enlace /comercial/cotizaciones/{id}", () => {
+    const src = readCreateCotizacionDialog();
+    // El id/code se toma del DTO devuelto (no se inventa).
+    expect(/String\(\(quote as \{ id\?: unknown \}\)/.test(src)).toBe(true);
+    expect(/String\(\(quote as \{ code\?: unknown \}\)/.test(src)).toBe(true);
+    expect(/String\(\(quote as \{ status\?: unknown \}\)/.test(src)).toBe(true);
+    // El enlace usa el id real entregado por el backend.
+    expect(/href=\{`\/comercial\/cotizaciones\/\$\{createdQuote\.id\}`\}/.test(
+      src,
+    )).toBe(true);
+    expect(/create-cotizacion-success/.test(src)).toBe(true);
+    expect(/createOpenLink/.test(src)).toBe(true);
   });
 });
