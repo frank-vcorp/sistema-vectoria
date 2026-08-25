@@ -308,46 +308,101 @@ describe("SPEC-002-UI-20260824-04 · P3 · error code PROSPECT_CODE_DUPLICATE", 
 });
 
 /**
- * SPEC-002-UI-20260824-04 · P3 UX.
+ * SPEC-002-UI-20260824-05 · P4 funcional.
  *
- * La acción `Calificar` permanece siempre deshabilitada mientras
- * SPEC-003 no exponga cuestionarios publicados por prospecto (BR-N148).
- * El botón NO invoca handler ni envía UUID dummy; la nota accesible
- * queda enlazada por `aria-describedby` para usuarios de tecnología
- * asistiva. Esta verificación es estática (lee el archivo del módulo)
- * para no acoplar el test a un cliente React.
+ * La acción `Calificar` consulta cuestionarios REALES
+ * (`trpc.comercial.cuestionarios.list`) y se habilita sólo cuando
+ * existe al menos uno con `status === 'published'`. Sin cuestionarios
+ * publicados el botón permanece deshabilitado y muestra la nota
+ * accesible; NO envía UUID dummy ni accede a la BD directamente.
+ * El envío del cuestionario se realiza desde
+ * `CalificarProspectoDialog` invocando primero `submitResponse` y
+ * después `prospectos.qualify` con el `questionnaireId` real.
+ * Verificación estática (lectura del archivo del módulo) para no
+ * acoplar el test a un cliente React.
  */
-describe("SPEC-002-UI-20260824-04 · P3 UX · qualify siempre deshabilitado", () => {
-  it("el botón qualify del detalle se renderiza con `disabled` y `aria-disabled`", () => {
+describe("SPEC-002-UI-20260824-05 · P4 UX · qualify con cuestionarios publicados", () => {
+  it("el botón qualify consulta cuestionarios publicados (no UUID dummy)", () => {
     const src = readProspectoDetalle();
-    // Aislamos el bloque del botón qualify: anclamos por su data-testid,
-    // retrocedemos al `<Button` de apertura y avanzamos hasta su cierre
-    // `</Button>`. El qualify no es self-closing (envuelve texto), por
-    // lo que cortar por `/>` contaminaría con el bloque siguiente.
-    const idx = src.indexOf('data-testid="prospecto-qualify-button"');
-    expect(idx, "no se encontró el botón qualify").toBeGreaterThan(-1);
-    const start = src.lastIndexOf("<Button", idx);
-    expect(start).toBeGreaterThan(-1);
-    const end = src.indexOf("</Button>", idx) + "</Button>".length;
-    const block = src.slice(start, end);
-    expect(block).toMatch(/\bdisabled\b/);
-    expect(block).toMatch(/aria-disabled/);
-    expect(block).not.toMatch(/onClick\s*=/);
+    // Usa el query real del catálogo y filtra publicados.
+    expect(/comercial\.cuestionarios\.list\.useQuery/.test(src)).toBe(true);
+    expect(/status === ['"]published['"]/.test(src)).toBe(true);
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    // Evita `window.prompt(` como llamada real (no como referencia
+    // documental en comentarios).
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
   });
-  it("existe una nota accesible vinculada por aria-describedby al botón", () => {
+  it("abre el diálogo real (CalificarProspectoDialog) en lugar de enviar UUID", () => {
     const src = readProspectoDetalle();
-    const buttonHasDescribedBy = /aria-describedby="prospecto-qualify-blocked-note"/.test(
+    expect(/CalificarProspectoDialog/.test(src)).toBe(true);
+    expect(/open=\{dialog === ['"]qualify['"]\}/.test(src)).toBe(true);
+  });
+  it("el diálogo llama submitResponse y luego qualify con questionnaireId real", () => {
+    const src = readCalificarDialog();
+    // Orden de mutaciones: submitResponse primero, qualify después.
+    const submitIdx = src.indexOf("submitResponse.mutate(");
+    const qualifyIdx = src.indexOf("qualifyMutation.mutate(");
+    expect(submitIdx).toBeGreaterThan(-1);
+    expect(qualifyIdx).toBeGreaterThan(-1);
+    expect(qualifyIdx).toBeGreaterThan(submitIdx);
+    // Pasa el questionnaireId al qualify.
+    expect(/questionnaireId,\s*\n?\s*prospectId/.test(src)).toBe(true);
+    // No UUID dummy embebido.
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+  });
+  it("renderiza preguntas por answerType (text, number, boolean, single_choice)", () => {
+    const src = readCalificarDialog();
+    expect(/text/.test(src)).toBe(true);
+    expect(/number/.test(src)).toBe(true);
+    expect(/boolean/.test(src)).toBe(true);
+    expect(/single_choice/.test(src)).toBe(true);
+  });
+  it("respeta required y muestra error antes de mutar", () => {
+    const src = readCalificarDialog();
+    expect(/requiredField/.test(src)).toBe(true);
+    expect(/fillRequired/.test(src)).toBe(true);
+    expect(/role="alert"/.test(src)).toBe(true);
+  });
+  it("muestra error de submit sin perder contexto ni afirmar éxito", () => {
+    const src = readCalificarDialog();
+    expect(/calificar-submit-error/.test(src)).toBe(true);
+    expect(/setSubmitError\(/.test(src)).toBe(true);
+    // El éxito del query NO marca qualifies done sin la mutación succeed.
+    expect(/onSuccess:\s*\(\)\s*=>\s*\{[^}]*qualifyMutation\.mutate/.test(
       src,
-    );
-    const noteExists = /id="prospecto-qualify-blocked-note"/.test(src);
-    expect(buttonHasDescribedBy).toBe(true);
-    expect(noteExists).toBe(true);
+    )).toBe(true);
   });
-  it("la nota explica que requiere cuestionario publicado (mensaje canónico)", () => {
-    const src = readProspectoDetalle();
-    // La nota usa el mensaje canónico `qualifyNeedsQuestionnaire` (ya
-    // catalogado en messages.ts); evita literales ad-hoc.
-    expect(/qualifyNeedsQuestionnaire/.test(src)).toBe(true);
+  it("captura presupuesto declarado (MXN) y tipo de proyecto", () => {
+    const src = readCalificarDialog();
+    expect(/presupuestoDeclaradoCents/.test(src)).toBe(true);
+    expect(/projectType/.test(src)).toBe(true);
+    expect(/presupuestoMxn/.test(src)).toBe(true);
+  });
+  it("mantiene accesible: label htmlFor, aria-required, role=alert/role=radiogroup", () => {
+    const src = readCalificarDialog();
+    expect(/htmlFor=/.test(src)).toBe(true);
+    expect(/aria-required/.test(src)).toBe(true);
+    expect(/role="radiogroup"/.test(src)).toBe(true);
+    expect(/role="alert"/.test(src)).toBe(true);
+  });
+});
+
+/**
+ * SPEC-002-UI-20260824-05 · guarda contra fallback a gap histórico.
+ * El catálogo `messages.prospectos` expone los textos del nuevo diálogo
+ * (sin literales ad-hoc embebidos en el componente).
+ */
+describe("SPEC-002-UI-20260824-05 · messages qualifyDialog", () => {
+  it("messages.ts incluye `prospectos.qualifyDialog` con campos clave", async () => {
+    const msgs = await readMessages();
+    const qd = (msgs as { prospectos: { qualifyDialog: Record<string, unknown> } })
+      .prospectos.qualifyDialog;
+    expect(qd.title).toBeTypeOf("string");
+    expect(qd.submit).toBeTypeOf("string");
+    expect(qd.selectQuestionnaire).toBeTypeOf("string");
+    expect(qd.fillRequired).toBeTypeOf("string");
+    expect(qd.presupuestoLabel).toBeTypeOf("string");
+    expect(qd.projectTypeLabel).toBeTypeOf("string");
   });
 });
 
@@ -370,4 +425,26 @@ const PROSPECTO_DETALLE_PATH = _resolve(
 );
 function readProspectoDetalle(): string {
   return _readFileSync(PROSPECTO_DETALLE_PATH, "utf8");
+}
+
+const CALIFICAR_DIALOG_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "modules",
+  "clientes",
+  "prospectos",
+  "calificar-prospecto-dialog.tsx",
+);
+function readCalificarDialog(): string {
+  return _readFileSync(CALIFICAR_DIALOG_PATH, "utf8");
+}
+
+async function readMessages(): Promise<unknown> {
+  // Import estático a través del loader TS de Vitest; permite verificar
+  // el catálogo de mensajes sin transpilación manual.
+  const mod = (await import("../src/shared/utils/messages" as string)) as {
+    messages: unknown;
+  };
+  return mod.messages;
 }

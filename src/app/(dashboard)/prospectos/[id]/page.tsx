@@ -22,16 +22,18 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CalificarProspectoDialog } from "@/modules/clientes/prospectos/calificar-prospecto-dialog";
 
 /**
  * Detalle de prospecto (SPEC-002). Carga por id y expone las acciones
  * compatibles con los procedimientos existentes:
  *
  *  - `qualify` (BR-N148): requiere cuestionario vinculado (SPEC-003).
- *    No hay endpoint público que liste cuestionarios por prospecto, por
- *    lo que la UI NO consume UUIDs dummy. La acción se muestra bloqueada
- *    con explicación; el gap de contrato se reporta a ATLAS como
- *    `SPEC-GAP` (no se implementa aquí porque requiere contrato nuevo).
+ *    El botón `Calificar` se habilita únicamente cuando el catálogo
+ *    `trpc.comercial.cuestionarios.list` expone al menos un cuestionario
+ *    con `status === "published"`. La selección y el envío de respuestas
+ *    viven en `CalificarProspectoDialog` (módulo UI); este componente
+ *    NO envía UUIDs dummy ni toca la BD.
  *  - `setLost` / `setSuspended` (BR-N213/214): motivo obligatorio,
  *    capturado en un Dialog inline (sin `window.prompt`).
  *  - `reactivate` (BR-N214): sólo desde `suspendido`; conserva
@@ -41,7 +43,7 @@ import { Label } from "@/components/ui/label";
  * Promise) y React 18.3 no expone `React.use`. Tratarlo como objeto
  * evita la excepción cliente "Application error" en staging.
  */
-type ActionDialog = null | "lost" | "suspended";
+type ActionDialog = null | "lost" | "suspended" | "qualify";
 
 export default function ProspectoDetallePage({
   params,
@@ -56,6 +58,18 @@ export default function ProspectoDetallePage({
   const [reason, setReason] = React.useState("");
   const [reasonError, setReasonError] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
+  const [qualifySuccess, setQualifySuccess] = React.useState<string | null>(
+    null,
+  );
+
+  // Catálogo publicado para habilitar el botón Calificar (sin UUIDs dummy).
+  const cuestionariosList = trpc.comercial.cuestionarios.list.useQuery();
+  const publishedQuestionnaires = React.useMemo(
+    () => (cuestionariosList.data ?? []).filter((q) => q.status === "published"),
+    [cuestionariosList.data],
+  );
+  const hasPublishedQuestionnaires = publishedQuestionnaires.length > 0;
+  const catalogLoading = cuestionariosList.isLoading;
 
   const setLost = trpc.clientes.prospectos.setLost.useMutation({
     onSuccess: () => {
@@ -135,6 +149,7 @@ export default function ProspectoDetallePage({
     setReason("");
     setReasonError(null);
     setActionError(null);
+    if (target !== "qualify") setQualifySuccess(null);
     setDialog(target);
   }
 
@@ -220,22 +235,37 @@ export default function ProspectoDetallePage({
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-2">
             {/*
-              SPEC-002-UI-20260824-04 · P3 UX: la acción `Calificar` se
-              mantiene SIEMPRE deshabilitada mientras SPEC-003 no
-              exponga cuestionarios publicados por prospecto (BR-N148).
-              El botón no invoca handler ni envía UUID dummy: sin
-              cuestionario real, la acción no debe parecer operable.
-              La nota accesible vinculada por `aria-describedby`
-              comunica el motivo sin afectar el layout.
+              SPEC-002-UI-20260824-05 · P4 funcional. La acción
+              `Calificar` se habilita sólo si hay cuestionarios
+              publicados reales (`trpc.comercial.cuestionarios.list`
+              con `status==='published'`). La selección de
+              cuestionario, captura de respuestas y envío se
+              realizan en `CalificarProspectoDialog`; este botón
+              no envía UUIDs dummy ni invoca handlers con
+              cuestionarios inexistentes. Mientras carga el
+              catálogo o no hay publicados, se mantiene
+              deshabilitado con la nota accesible.
             */}
             <Button
               variant="default"
               size="sm"
-              disabled
-              title={messages.prospectos.qualifyNeedsQuestionnaire}
-              aria-describedby="prospecto-qualify-blocked-note"
+              disabled={
+                !hasPublishedQuestionnaires ||
+                catalogLoading ||
+                p.status === "calificado"
+              }
+              onClick={() => openDialog("qualify")}
+              title={
+                hasPublishedQuestionnaires
+                  ? undefined
+                  : messages.prospectos.qualifyNeedsQuestionnaire
+              }
+              aria-describedby={
+                hasPublishedQuestionnaires
+                  ? undefined
+                  : "prospecto-qualify-blocked-note"
+              }
               data-testid="prospecto-qualify-button"
-              aria-disabled
             >
               {messages.prospectos.qualify}
             </Button>
@@ -268,14 +298,26 @@ export default function ProspectoDetallePage({
             </Button>
           </div>
 
-          <p
-            id="prospecto-qualify-blocked-note"
-            className="text-xs text-muted-foreground"
-            role="note"
-            data-testid="prospecto-qualify-blocked-note"
-          >
-            {messages.prospectos.qualifyNeedsQuestionnaire}
-          </p>
+          {!hasPublishedQuestionnaires ? (
+            <p
+              id="prospecto-qualify-blocked-note"
+              className="text-xs text-muted-foreground"
+              role="note"
+              data-testid="prospecto-qualify-blocked-note"
+            >
+              {messages.prospectos.qualifyNeedsQuestionnaire}
+            </p>
+          ) : null}
+
+          {qualifySuccess ? (
+            <p
+              role="status"
+              className="text-sm text-emerald-700"
+              data-testid="prospecto-qualify-success"
+            >
+              {qualifySuccess}
+            </p>
+          ) : null}
 
           {actionError ? (
             <p
@@ -290,7 +332,7 @@ export default function ProspectoDetallePage({
       </Card>
 
       <Dialog
-        open={dialog !== null}
+        open={dialog === "lost" || dialog === "suspended"}
         onOpenChange={(next) => {
           if (!next) setDialog(null);
         }}
@@ -360,6 +402,17 @@ export default function ProspectoDetallePage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CalificarProspectoDialog
+        prospectId={p.id}
+        open={dialog === "qualify"}
+        onOpenChange={(next) => {
+          if (!next) setDialog(null);
+        }}
+        onSuccess={() => {
+          setQualifySuccess(messages.prospectos.qualifyDialog.success);
+        }}
+      />
     </div>
   );
 }
