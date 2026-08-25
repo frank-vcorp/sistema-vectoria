@@ -128,6 +128,26 @@ function toDto(row: typeof prospects.$inferSelect): ProspectDTO {
 export type ProspectScope = "own" | "all";
 
 /**
+ * Resuelve el `assignedTo` efectivo para un prospecto nuevo. Si el
+ * caller no lo especifica, el prospecto queda asignado al propio
+ * creador (BR-N207 / AC-6: un Vendedor que crea un prospecto debe poder
+ * verlo en su listado `scope='own'` sin pasos adicionales).
+ *
+ * Helper puro exportado para tests sin BD. El shape del input público
+ * NO se modifica; el default se aplica dentro del servicio.
+ */
+export function resolveAssignedTo(
+  input: { assignedTo?: string | null },
+  creatorId: string,
+): string {
+  const candidate = input.assignedTo;
+  if (typeof candidate === "string" && candidate.length > 0) {
+    return candidate;
+  }
+  return creatorId;
+}
+
+/**
  * Decide el alcance del listado para el `Context` actual.
  * - Director / Admin (`ver_todo`) → todos.
  * - Vendedor (con `gestionar_prospectos` y sin `ver_todo`) → propios.
@@ -207,7 +227,13 @@ export function createProspectsService(): ProspectsService {
       .limit(1);
     if (exists) {
       throw new DomainError(
-        "ForbiddenError",
+        // SPEC-002-UI-20260824-04 · P3 contrato: el código de dominio
+        // para duplicado es específico (`PROSPECT_CODE_DUPLICATE`),
+        // no `ForbiddenError` — ése lo reutiliza el middleware de
+        // `hasPermission.require()` para permisos (HTTP 403). Mantener
+        // HTTP 409 (conflicto de unicidad, BR-N216) y `detail` con el
+        // `code` humano para que la UI muestre el mensaje accionable.
+        "PROSPECT_CODE_DUPLICATE",
         `Código de prospecto duplicado: ${input.code}`,
         409,
         { code: input.code },
@@ -224,7 +250,11 @@ export function createProspectsService(): ProspectsService {
         phone: input.phone ?? null,
         source: input.source ?? null,
         medium: input.medium ?? null,
-        assignedTo: input.assignedTo ?? null,
+        // P2 funcional: si el caller no pasa `assignedTo`, el prospecto
+        // queda asignado al propio creador (BR-N207 / AC-6). Antes
+        // quedaba `null` y un Vendedor no veía su propio prospecto en
+        // `scope='own'`. El input público no se modifica.
+        assignedTo: resolveAssignedTo(input, user.id),
         createdBy: user.id,
         status: "nuevo",
         archived: false,

@@ -95,6 +95,8 @@ export const messages = {
           "Ya existe un prospecto con ese código en tu organización.",
         createFailed: "No fue posible crear el prospecto.",
         codeServer: "Código duplicado por organización.",
+        forbidden:
+          "No tienes permisos para crear prospectos. Contacta al Director.",
         reasonRequired:
           "El motivo es obligatorio (mínimo 3 caracteres).",
         reasonMinLength: "Mínimo 3 caracteres.",

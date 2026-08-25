@@ -32,7 +32,12 @@ import { Label } from "@/components/ui/label";
  */
 type FormStatus = "idle" | "submitting" | "success" | "error";
 
-const DOMAIN_ERROR_DUPLICATE = "ForbiddenError"; // backend lanza ForbiddenError 409 con code duplicado
+// SPEC-002-UI-20260824-04 · P3 contrato: el backend emite
+// `PROSPECT_CODE_DUPLICATE` (HTTP 409) cuando el `code` ya existe en la
+// organización (BR-N216). `ForbiddenError` se reserva al middleware de
+// `hasPermission.require()` para permisos (HTTP 403); el form lo trata
+// como "permiso insuficiente" sin contaminar el mensaje de duplicado.
+const DOMAIN_ERROR_DUPLICATE = "PROSPECT_CODE_DUPLICATE";
 
 // Mapeo código → etiqueta usando el catálogo cerrado.
 const MEDIUM_OPTIONS = [
@@ -104,14 +109,24 @@ export function ProspectoForm({
     },
     onError: (err) => {
       setStatus("error");
-      // Mapeo de códigos de dominio → mensaje accionable.
+      // SPEC-002-UI-20260824-04 · P3 contrato: el mapeo UI distingue
+      // tres casos: (a) 409 PROSPECT_CODE_DUPLICATE → mensaje en el
+      // campo `code` (acccionable, BR-N216); (b) 403 ForbiddenError →
+      // mensaje general de permiso insuficiente (HTTP 403 lo emite
+      // `hasPermission.require`); (c) resto → mensaje genérico.
       const code = err.data?.code ?? null;
+      const httpStatus = err.data?.httpStatus ?? null;
       if (code === DOMAIN_ERROR_DUPLICATE) {
         setFieldErrors((fe) => ({
           ...fe,
           code: messages.prospectos.form.errors.codeServer,
         }));
         setServerError(null);
+        return;
+      }
+      if (httpStatus === 403 || code === "ForbiddenError") {
+        setFieldErrors({});
+        setServerError(messages.prospectos.form.errors.forbidden);
         return;
       }
       // Errores Zod del backend (validación servidor reforzada).

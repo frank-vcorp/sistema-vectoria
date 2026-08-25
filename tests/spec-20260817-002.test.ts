@@ -23,6 +23,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CLIENT_AUDIT_ACTIONS,
+  ERROR_CODES,
   PROSPECT_MEDIUMS,
   PROSPECT_STATUSES,
 } from "@/shared/enums";
@@ -40,6 +41,7 @@ import {
 import {
   canTransition,
   createProspectsService,
+  resolveAssignedTo,
   resolveProspectScope,
 } from "@/server/services/clientes/prospects";
 import { createClientsService, isValidArchiveReason } from "@/server/services/clientes/clients";
@@ -253,3 +255,119 @@ describe("SPEC-002 · ProspectCreateInputSchema", () => {
     ).toBe(false);
   });
 });
+
+/**
+ * SPEC-002-UI-20260824-04 · P2 funcional.
+ *
+ * `resolveAssignedTo` aplica la regla BR-N207 / AC-6: si el caller
+ * no especifica `assignedTo`, el prospecto queda asignado al propio
+ * creador, de modo que un Vendedor que crea un prospecto lo ve en su
+ * listado `scope='own'` sin pasos adicionales. El shape del input
+ * público no se modifica (sigue aceptando `assignedTo?: string`).
+ */
+describe("SPEC-002-UI-20260824-04 · P2 · resolveAssignedTo", () => {
+  const CREATOR = "00000000-0000-0000-0000-000000000002";
+  const OTHER = "00000000-0000-0000-0000-000000000099";
+
+  it("asigna al creador cuando assignedTo es undefined", () => {
+    expect(resolveAssignedTo({}, CREATOR)).toBe(CREATOR);
+  });
+  it("asigna al creador cuando assignedTo es null", () => {
+    expect(resolveAssignedTo({ assignedTo: null }, CREATOR)).toBe(CREATOR);
+  });
+  it("asigna al creador cuando assignedTo es cadena vacía", () => {
+    expect(resolveAssignedTo({ assignedTo: "" }, CREATOR)).toBe(CREATOR);
+  });
+  it("respeta el assignedTo explícito cuando viene informado", () => {
+    expect(resolveAssignedTo({ assignedTo: OTHER }, CREATOR)).toBe(OTHER);
+  });
+  it("creators distintos no se confunden con el default", () => {
+    const a = resolveAssignedTo({}, "11111111-1111-1111-1111-111111111111");
+    const b = resolveAssignedTo({}, "22222222-2222-2222-2222-222222222222");
+    expect(a).not.toBe(b);
+  });
+});
+
+/**
+ * SPEC-002-UI-20260824-04 · P3 contrato de error.
+ *
+ * El backend emite `PROSPECT_CODE_DUPLICATE` (HTTP 409) cuando el
+ * `code` ya existe en la organización (BR-N216). `ForbiddenError` se
+ * reserva para el middleware de `hasPermission.require` (HTTP 403).
+ */
+describe("SPEC-002-UI-20260824-04 · P3 · error code PROSPECT_CODE_DUPLICATE", () => {
+  it("PROSPECT_CODE_DUPLICATE forma parte del catálogo canónico de ERROR_CODES", () => {
+    expect(ERROR_CODES).toContain("PROSPECT_CODE_DUPLICATE");
+  });
+  it("ForbiddenError sigue presente (compatibilidad con middleware de permisos)", () => {
+    expect(ERROR_CODES).toContain("ForbiddenError");
+  });
+  it("PROSPECT_CODE_DUPLICATE y ForbiddenError son códigos distintos", () => {
+    expect("PROSPECT_CODE_DUPLICATE").not.toBe("ForbiddenError");
+  });
+});
+
+/**
+ * SPEC-002-UI-20260824-04 · P3 UX.
+ *
+ * La acción `Calificar` permanece siempre deshabilitada mientras
+ * SPEC-003 no exponga cuestionarios publicados por prospecto (BR-N148).
+ * El botón NO invoca handler ni envía UUID dummy; la nota accesible
+ * queda enlazada por `aria-describedby` para usuarios de tecnología
+ * asistiva. Esta verificación es estática (lee el archivo del módulo)
+ * para no acoplar el test a un cliente React.
+ */
+describe("SPEC-002-UI-20260824-04 · P3 UX · qualify siempre deshabilitado", () => {
+  it("el botón qualify del detalle se renderiza con `disabled` y `aria-disabled`", () => {
+    const src = readProspectoDetalle();
+    // Aislamos el bloque del botón qualify: anclamos por su data-testid,
+    // retrocedemos al `<Button` de apertura y avanzamos hasta su cierre
+    // `</Button>`. El qualify no es self-closing (envuelve texto), por
+    // lo que cortar por `/>` contaminaría con el bloque siguiente.
+    const idx = src.indexOf('data-testid="prospecto-qualify-button"');
+    expect(idx, "no se encontró el botón qualify").toBeGreaterThan(-1);
+    const start = src.lastIndexOf("<Button", idx);
+    expect(start).toBeGreaterThan(-1);
+    const end = src.indexOf("</Button>", idx) + "</Button>".length;
+    const block = src.slice(start, end);
+    expect(block).toMatch(/\bdisabled\b/);
+    expect(block).toMatch(/aria-disabled/);
+    expect(block).not.toMatch(/onClick\s*=/);
+  });
+  it("existe una nota accesible vinculada por aria-describedby al botón", () => {
+    const src = readProspectoDetalle();
+    const buttonHasDescribedBy = /aria-describedby="prospecto-qualify-blocked-note"/.test(
+      src,
+    );
+    const noteExists = /id="prospecto-qualify-blocked-note"/.test(src);
+    expect(buttonHasDescribedBy).toBe(true);
+    expect(noteExists).toBe(true);
+  });
+  it("la nota explica que requiere cuestionario publicado (mensaje canónico)", () => {
+    const src = readProspectoDetalle();
+    // La nota usa el mensaje canónico `qualifyNeedsQuestionnaire` (ya
+    // catalogado en messages.ts); evita literales ad-hoc.
+    expect(/qualifyNeedsQuestionnaire/.test(src)).toBe(true);
+  });
+});
+
+// Helper de lectura estática del módulo de detalle (mismo patrón que
+// `tests/seed-plataforma-redaction.test.ts`).
+import { readFileSync as _readFileSync } from "node:fs";
+import { dirname as _dirname, resolve as _resolve } from "node:path";
+import { fileURLToPath as _fileURLToPath } from "node:url";
+const __spec_filename = _fileURLToPath(import.meta.url);
+const __spec_dirname = _dirname(__spec_filename);
+const PROSPECTO_DETALLE_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "app",
+  "(dashboard)",
+  "prospectos",
+  "[id]",
+  "page.tsx",
+);
+function readProspectoDetalle(): string {
+  return _readFileSync(PROSPECTO_DETALLE_PATH, "utf8");
+}

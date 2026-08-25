@@ -128,8 +128,6 @@ export default function ProspectoDetallePage({
   const p = query.data;
   const isLost = p.status === "perdido";
   const isSuspended = p.status === "suspendido";
-  const isTerminal = isLost;
-  const isQualifiable = p.status === "nuevo" || p.status === "contactado";
   const canSetLostOrSuspended = !isLost; // perdido es terminal; suspendido permite ambos antes
   const reasonMinLength = 3;
 
@@ -221,17 +219,23 @@ export default function ProspectoDetallePage({
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-2">
+            {/*
+              SPEC-002-UI-20260824-04 · P3 UX: la acción `Calificar` se
+              mantiene SIEMPRE deshabilitada mientras SPEC-003 no
+              exponga cuestionarios publicados por prospecto (BR-N148).
+              El botón no invoca handler ni envía UUID dummy: sin
+              cuestionario real, la acción no debe parecer operable.
+              La nota accesible vinculada por `aria-describedby`
+              comunica el motivo sin afectar el layout.
+            */}
             <Button
               variant="default"
               size="sm"
-              disabled={!isQualifiable}
-              title={
-                isQualifiable
-                  ? undefined
-                  : messages.prospectos.qualifyNeedsQuestionnaire
-              }
+              disabled
+              title={messages.prospectos.qualifyNeedsQuestionnaire}
+              aria-describedby="prospecto-qualify-blocked-note"
               data-testid="prospecto-qualify-button"
-              aria-disabled={!isQualifiable}
+              aria-disabled
             >
               {messages.prospectos.qualify}
             </Button>
@@ -264,20 +268,14 @@ export default function ProspectoDetallePage({
             </Button>
           </div>
 
-          {!isQualifiable && !isTerminal ? (
-            <p
-              className="text-xs text-muted-foreground"
-              role="note"
-              data-testid="prospecto-qualify-blocked-note"
-            >
-              {messages.prospectos.qualifyNeedsQuestionnaire}
-            </p>
-          ) : null}
-          {isTerminal ? (
-            <p className="text-xs text-muted-foreground" role="note">
-              {messages.prospectos.qualifyNeedsQuestionnaire}
-            </p>
-          ) : null}
+          <p
+            id="prospecto-qualify-blocked-note"
+            className="text-xs text-muted-foreground"
+            role="note"
+            data-testid="prospecto-qualify-blocked-note"
+          >
+            {messages.prospectos.qualifyNeedsQuestionnaire}
+          </p>
 
           {actionError ? (
             <p
