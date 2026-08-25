@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * SPEC-002-UI-20260825-22 · Detalle del alcance (read-only).
+ * SPEC-002-UI-20260825-22 + IMPL-20260825-23 · Detalle del alcance.
  *
  * Lee el documento vía `trpc.comercial.alcance.byId` (sin acceso
  * directo a BD, sin UUID dummy) y muestra de forma segura y
@@ -10,9 +10,17 @@
  *    version, generatedAt y projectType.
  *  - Bloques del contenido (`included`, `excluded`, `deliverables`,
  *    `assumptions`, `clientDependencies`, `acceptanceCriteria`).
+ *  - En `signed`: `signedAt`, `signedBy`, `signedReason` y nota de
+ *    inmutabilidad (BR-N52).
  *
- * NO expone edición, firma ni transición de estado — esos flujos
- * viven en cortes posteriores (SPEC-004/005).
+ * IMPL-20260825-23 cablea las transiciones existentes:
+ *  - `draft` → botón "Enviar a revisión" → `alcance.submitForReview`.
+ *  - `in_review` → botón "Firmar alcance" → diálogo con motivo
+ *    obligatorio (≥3) → `alcance.sign` (BR-N231/52).
+ *  - `signed` → ninguna mutación; sólo lectura + nota de inmutabilidad.
+ *
+ * Errores de permisos o dominio se exponen con `role="alert"`; la UI
+ * NO afirma éxito si la mutación falla.
  */
 import * as React from "react";
 import Link from "next/link";
@@ -26,6 +34,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { messages } from "@/shared/utils";
 import { trpc } from "@/lib/trpc";
+import { SignAlcanceDialog } from "./sign-alcance-dialog";
 
 /** Bloques tal como los produce `generateScopeDraftContent` (helpers.ts). */
 interface ScopeDraftBlocks {
@@ -69,6 +78,28 @@ export function AlcanceDetail({ id }: { id: string }) {
     { enabled: id.length > 0, retry: 1 },
   );
 
+  const [signOpen, setSignOpen] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
+
+  const submitForReview = trpc.comercial.alcance.submitForReview.useMutation({
+    onError: (err) => {
+      const code = err.data?.code ?? null;
+      if (code === "FORBIDDEN") {
+        setSubmitError(messages.alcance.transitionError);
+        return;
+      }
+      if (code === "SCOPE_ALREADY_SIGNED") {
+        setSubmitError(err.message ?? messages.alcance.signImmutableNote);
+        return;
+      }
+      setSubmitError(err.message ?? messages.alcance.submitForReviewError);
+    },
+    onSuccess: () => {
+      setSubmitError(null);
+      void query.refetch();
+    },
+  });
+
   if (query.isLoading) {
     return (
       <Card>
@@ -99,6 +130,17 @@ export function AlcanceDetail({ id }: { id: string }) {
   }
 
   const scope = query.data;
+  const status = scope.status;
+  const canSubmitForReview = status === "draft";
+  const canSign = status === "in_review";
+  const isSigned = status === "signed";
+
+  function onSubmitForReview() {
+    if (!query.data) return;
+    setSubmitError(null);
+    submitForReview.mutate({ scopeId: query.data.id });
+  }
+
   const content: ScopeDraftContentShape =
     scope.content && typeof scope.content === "object"
       ? (scope.content as ScopeDraftContentShape)
@@ -176,8 +218,78 @@ export function AlcanceDetail({ id }: { id: string }) {
               {generatedAt}
             </p>
           ) : null}
+          {isSigned ? (
+            <>
+              {readStringOrNull(scope.signedAt) ? (
+                <p data-testid="alcance-detail-signed-at">
+                  <strong>{messages.alcance.signedAtLabel}:</strong>{" "}
+                  {String(scope.signedAt)}
+                </p>
+              ) : null}
+              {readStringOrNull(scope.signedBy) ? (
+                <p data-testid="alcance-detail-signed-by">
+                  <strong>{messages.alcance.signedByLabel}:</strong>{" "}
+                  <span className="font-mono">{scope.signedBy}</span>
+                </p>
+              ) : null}
+              {readStringOrNull(scope.signedReason) ? (
+                <p
+                  className="sm:col-span-2"
+                  data-testid="alcance-detail-signed-reason"
+                >
+                  <strong>{messages.alcance.signedReasonLabel}:</strong>{" "}
+                  {scope.signedReason}
+                </p>
+              ) : null}
+            </>
+          ) : null}
         </CardContent>
+        {canSubmitForReview || canSign ? (
+          <CardContent className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            {canSubmitForReview ? (
+              <Button
+                type="button"
+                onClick={onSubmitForReview}
+                disabled={submitForReview.isPending}
+                data-testid="alcance-detail-submit-for-review"
+              >
+                {submitForReview.isPending
+                  ? messages.alcance.submitForReviewSubmitting
+                  : messages.alcance.submitForReview}
+              </Button>
+            ) : null}
+            {canSign ? (
+              <Button
+                type="button"
+                onClick={() => setSignOpen(true)}
+                data-testid="alcance-detail-open-sign"
+              >
+                {messages.alcance.sign}
+              </Button>
+            ) : null}
+          </CardContent>
+        ) : null}
+        {isSigned ? (
+          <CardContent>
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="alcance-detail-immutable-note"
+            >
+              {messages.alcance.signImmutableNote}
+            </p>
+          </CardContent>
+        ) : null}
       </Card>
+
+      {submitError ? (
+        <p
+          role="alert"
+          className="text-sm text-destructive"
+          data-testid="alcance-detail-transition-error"
+        >
+          {submitError}
+        </p>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -227,6 +339,17 @@ export function AlcanceDetail({ id }: { id: string }) {
           )}
         </CardContent>
       </Card>
+
+      <SignAlcanceDialog
+        scopeId={scope.id}
+        scopeContext={`${messages.alcance.idLabel}: ${scope.id}`}
+        open={signOpen}
+        onOpenChange={setSignOpen}
+        onSuccess={() => {
+          setSignOpen(false);
+          void query.refetch();
+        }}
+      />
     </div>
   );
 }

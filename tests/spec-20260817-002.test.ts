@@ -470,6 +470,19 @@ function readAlcanceDetail(): string {
   return _readFileSync(ALCANCE_DETAIL_PATH, "utf8");
 }
 
+const SIGN_ALCANCE_DIALOG_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "modules",
+  "comercial",
+  "alcance",
+  "sign-alcance-dialog.tsx",
+);
+function readSignAlcanceDialog(): string {
+  return _readFileSync(SIGN_ALCANCE_DIALOG_PATH, "utf8");
+}
+
 async function readMessages(): Promise<unknown> {
   // Import estático a través del loader TS de Vitest; permite verificar
   // el catálogo de mensajes sin transpilación manual.
@@ -675,12 +688,157 @@ describe("SPEC-002-UI-20260825-22 · AlcanceDetail lee alcance.byId y muestra lo
     expect(/alcance-block-dependencies/.test(src)).toBe(true);
     expect(/alcance-block-acceptance/.test(src)).toBe(true);
   });
-  it("no agrega edición ni firma (corte read-only)", () => {
+  it("IMPL-20260825-23 · cablea submitForReview (no edición libre, no sign directo)", () => {
     const src = readAlcanceDetail();
-    // No debe invocar mutaciones de sign/submitForReview.
+    // El detalle invoca la mutación real de submitForReview.
+    expect(/alcance\.submitForReview\.useMutation/.test(src)).toBe(true);
+    expect(/submitForReview\.mutate\(\s*\{\s*scopeId:[\s\S]*?\}\)/.test(src)).toBe(true);
+    // El detalle NO invoca `sign` directamente — esa mutación vive en
+    // el diálogo SignAlcanceDialog para exigir motivo ≥3.
     expect(src).not.toMatch(/alcance\.sign\.useMutation/);
-    expect(src).not.toMatch(/alcance\.submitForReview\.useMutation/);
-    // Sigue siendo read-only (no inputs editables).
+    // Sigue sin inputs editables de "texto libre" en el detalle (sólo
+    // botones de acción; el motivo se captura en el diálogo).
     expect(src).not.toMatch(/<input[^>]*type="text"/);
+  });
+});
+
+/**
+ * IMPL-20260825-23 · SPEC-003 B6 — Transiciones operables
+ * `draft → in_review → signed` desde el detalle del alcance,
+ * reutilizando únicamente contratos ya existentes
+ * (`trpc.comercial.alcance.submitForReview` y
+ * `trpc.comercial.alcance.sign`). No se crea el flujo de
+ * cotización.
+ *
+ * Cubre:
+ *  - Mensajes canónicos del flujo de firma/transición.
+ *  - El detalle expone acciones según status y NO afirma éxito si
+ *    la mutación falla (errores con `role="alert"`).
+ *  - El diálogo de firma exige motivo ≥3, llama `sign` real y
+ *    maneja errores de permisos / SCOPE_ALREADY_SIGNED.
+ */
+describe("IMPL-20260825-23 · alcance · mensajes de transiciones (submitForReview / sign)", () => {
+  it("messages.alcance incluye los textos canónicos de submitForReview y sign", async () => {
+    const msgs = (await readMessages()) as {
+      alcance: Record<string, unknown>;
+    };
+    const a = msgs.alcance;
+    expect(a.submitForReview).toBeTypeOf("string");
+    expect(a.submitForReviewSubmit).toBeTypeOf("string");
+    expect(a.submitForReviewSubmitting).toBeTypeOf("string");
+    expect(a.submitForReviewError).toBeTypeOf("string");
+    expect(a.sign).toBeTypeOf("string");
+    expect(a.signTitle).toBeTypeOf("string");
+    expect(a.signSubtitle).toBeTypeOf("string");
+    expect(a.signReasonLabel).toBeTypeOf("string");
+    expect(a.signReasonPlaceholder).toBeTypeOf("string");
+    expect(a.signReasonMinLength).toBeTypeOf("string");
+    expect(a.signSubmit).toBeTypeOf("string");
+    expect(a.signSubmitting).toBeTypeOf("string");
+    expect(a.signCancel).toBeTypeOf("string");
+    expect(a.signError).toBeTypeOf("string");
+    expect(a.signForbidden).toBeTypeOf("string");
+    expect(a.signImmutableNote).toBeTypeOf("string");
+    expect(a.signedAtLabel).toBeTypeOf("string");
+    expect(a.signedByLabel).toBeTypeOf("string");
+    expect(a.signedReasonLabel).toBeTypeOf("string");
+    expect(a.transitionError).toBeTypeOf("string");
+  });
+});
+
+describe("IMPL-20260825-23 · AlcanceDetail cablea submitForReview y abre SignAlcanceDialog", () => {
+  it("invoca alcance.submitForReview vía mutate con scopeId real (no UUID dummy)", () => {
+    const src = readAlcanceDetail();
+    expect(/alcance\.submitForReview\.useMutation/.test(src)).toBe(true);
+    expect(/submitForReview\.mutate\(\s*\{\s*scopeId:\s*query\.data\.id/.test(src)).toBe(true);
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+  });
+
+  it("muestra el botón Enviar a revisión sólo en `draft` y abrir-firma sólo en `in_review`", () => {
+    const src = readAlcanceDetail();
+    // canSubmitForReview se ata a status === 'draft'.
+    expect(/canSubmitForReview\s*=\s*status\s*===\s*["']draft["']/.test(src)).toBe(true);
+    // canSign se ata a status === 'in_review'.
+    expect(/canSign\s*=\s*status\s*===\s*["']in_review["']/.test(src)).toBe(true);
+    // El botón expone data-testid accesible.
+    expect(/alcance-detail-submit-for-review/.test(src)).toBe(true);
+    expect(/alcance-detail-open-sign/.test(src)).toBe(true);
+  });
+
+  it("en `signed` no expone acciones de mutación y muestra la nota de inmutabilidad", () => {
+    const src = readAlcanceDetail();
+    // isSigned ata a status === 'signed'.
+    expect(/isSigned\s*=\s*status\s*===\s*["']signed["']/.test(src)).toBe(true);
+    // El bloque de acciones sólo se renderiza en draft / in_review.
+    expect(/\{canSubmitForReview\s*\|\|\s*canSign/.test(src)).toBe(true);
+    // Nota de inmutabilidad visible cuando isSigned.
+    expect(/alcance-detail-immutable-note/.test(src)).toBe(true);
+    expect(/signImmutableNote/.test(src)).toBe(true);
+  });
+
+  it("expone signedAt/signedBy/signedReason del DTO cuando está firmado", () => {
+    const src = readAlcanceDetail();
+    expect(/alcance-detail-signed-at/.test(src)).toBe(true);
+    expect(/alcance-detail-signed-by/.test(src)).toBe(true);
+    expect(/alcance-detail-signed-reason/.test(src)).toBe(true);
+    expect(/signedAtLabel/.test(src)).toBe(true);
+    expect(/signedByLabel/.test(src)).toBe(true);
+    expect(/signedReasonLabel/.test(src)).toBe(true);
+  });
+
+  it("los errores de permisos/dominio se exponen con role=alert sin afirmar éxito", () => {
+    const src = readAlcanceDetail();
+    // setSubmitError + role="alert" cuando la mutación falla.
+    expect(/alcance-detail-transition-error/.test(src)).toBe(true);
+    expect(/role="alert"/.test(src)).toBe(true);
+    // Maneja el código FORBIDDEN sin ocultarlo.
+    expect(/["']FORBIDDEN["']/.test(src)).toBe(true);
+    // Maneja SCOPE_ALREADY_SIGNED sin ocultarlo.
+    expect(/SCOPE_ALREADY_SIGNED/.test(src)).toBe(true);
+  });
+
+  it("monta el diálogo SignAlcanceDialog con scopeId real", () => {
+    const src = readAlcanceDetail();
+    expect(/SignAlcanceDialog/.test(src)).toBe(true);
+    expect(/scopeId=\{scope\.id\}/.test(src)).toBe(true);
+  });
+});
+
+describe("IMPL-20260825-23 · SignAlcanceDialog exige motivo ≥3 y llama alcance.sign real", () => {
+  it("invoca alcance.sign con scopeId + reason y exige motivo ≥3 antes de mutar", () => {
+    const src = readSignAlcanceDialog();
+    expect(/alcance\.sign\.useMutation/.test(src)).toBe(true);
+    expect(/sign\.mutate\(\s*\{\s*scopeId,\s*reason:[\s\S]*?\}\)/.test(src)).toBe(true);
+    // La validación cliente exige >=3 antes de invocar la mutación.
+    expect(/reasonValid\s*=\s*reasonTrimmed\.length\s*>=\s*3/.test(src)).toBe(true);
+    expect(/signReasonMinLength/.test(src)).toBe(true);
+    // Anti-patrón: nunca UUIDs dummy ni acceso directo a BD.
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+  });
+
+  it("accesibilidad: textarea con htmlFor + aria-required + errores con role=alert", () => {
+    const src = readSignAlcanceDialog();
+    expect(/<label[^>]*htmlFor=\{textareaId\}/.test(src)).toBe(true);
+    expect(/aria-required="true"/.test(src)).toBe(true);
+    expect(/aria-describedby="sign-alcance-reason-help"/.test(src)).toBe(true);
+    expect(/role="alert"/.test(src)).toBe(true);
+    expect(/data-testid="sign-alcance-reason"/.test(src)).toBe(true);
+    expect(/data-testid="sign-alcance-submit"/.test(src)).toBe(true);
+  });
+
+  it("los errores de permisos/dominio se exponen con role=alert y NO afirma éxito", () => {
+    const src = readSignAlcanceDialog();
+    // Mapeo explícito de códigos de error a mensajes canónicos.
+    expect(/["']FORBIDDEN["']/.test(src)).toBe(true);
+    expect(/signForbidden/.test(src)).toBe(true);
+    expect(/SCOPE_ALREADY_SIGNED/.test(src)).toBe(true);
+    expect(/SCOPE_SIGN_FORBIDDEN/.test(src)).toBe(true);
+    // El botón permanece hasta que la mutación concluya; el éxito
+    // cierra el diálogo y NO reemplaza el resultado con un mensaje
+    // sintético local.
+    expect(/onSuccess\?\.\(\{[\s\S]*?id:[\s\S]*?status:[\s\S]*?signedAt:[\s\S]*?signedBy:[\s\S]*?signedReason/.test(src)).toBe(true);
   });
 });

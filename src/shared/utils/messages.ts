@@ -349,6 +349,32 @@ export const messages = {
     generateOpenLink: "Abrir detalle del alcance",
     responseMissingNote:
       "Esta sesión no conservó el id de respuesta del cuestionario. Vuelve a calificar el prospecto para regenerar el alcance.",
+    // IMPL-20260825-23 · Transiciones draft → in_review → signed (BR-N51/52/231).
+    submitForReview: "Enviar a revisión",
+    submitForReviewSubmit: "Enviar a revisión",
+    submitForReviewSubmitting: "Enviando…",
+    submitForReviewError:
+      "No fue posible enviar el alcance a revisión.",
+    submitForReviewSuccess: "Alcance enviado a revisión.",
+    sign: "Firmar alcance",
+    signTitle: "Firmar alcance",
+    signSubtitle:
+      "Confirma la firma del alcance. El motivo es obligatorio y la acción es irreversible (BR-N231/52).",
+    signReasonLabel: "Motivo de firma",
+    signReasonPlaceholder: "Describe el motivo (≥3 caracteres)",
+    signReasonMinLength: "Mínimo 3 caracteres.",
+    signSubmit: "Firmar alcance",
+    signSubmitting: "Firmando…",
+    signCancel: "Cancelar",
+    signError: "No fue posible firmar el alcance.",
+    signForbidden:
+      "No tienes permisos para firmar el alcance (firmar_alcance).",
+    signImmutableNote:
+      "El alcance firmado es inmutable. Esta vista es de sólo lectura.",
+    signedAtLabel: "Firmado el",
+    signedByLabel: "Firmado por",
+    signedReasonLabel: "Motivo de firma",
+    transitionError: "No fue posible aplicar la transición.",
   },
   cotizaciones: {
     title: "Cotizaciones",
