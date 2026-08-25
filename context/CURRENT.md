@@ -66,7 +66,13 @@
 - `GET /api/v1/deployments/applications/gxioc8njzhrudvqlpqjgbvtm` devuelve historial de 14 deployments, también sólo metadatos.
 - `GET /api/v1/applications/gxioc8njzhrudvqlpqjgbvtm/logs` responde 200 con 2075 caracteres: es log runtime de la app, no output de build/deploy.
 - Verificación posterior a token adicional: confirmado. `GET /deployments/{uuid}` ahora incluye `.logs` para el deployment fallido `nc3vizuxdv64tgnkjjqwzhhz` (83,173 caracteres) y el exitoso `nl1iemnkttidw3bsnk4i6vik` (45,668 caracteres). La causa era el permiso de `Read sensitive data`; no era una limitación de Coolify ni un endpoint alternativo.
+- Implementación UI publicada: commit `4187aaa3984a012ca720ced4ac615ea4b617c35a`; antes de desplegar se corrigió el pin `git_commit_sha` de Coolify que seguía en `fc40b44`.
+- Deployment final: `b5w5roar7wngcpnbmlzkfdxc`, `finished`, SHA `4187aaa3984a012ca720ced4ac615ea4b617c35a`; aplicación `running:healthy`.
+- V3 staging: Playwright dirigido `30/30 PASS` en mobile-375, tablet-768 y desktop-1280 (11.3 s).
+- Estado del incremento: `DONE (staging-verificado)`; queda gate GEMINI por la política global de retry de React Query, sin bloqueador funcional observado.
 - Clasificación V3: los fallos de headings (`CardTitle` renderiza `div`) y el error cliente del detalle `/clientes/{id}` son `IMPLEMENTATION_DEFECT` dentro de SPEC-002; no hay evidencia de un gap funcional ni de infraestructura.
+
+**DOC-20260824-09** · CRONISTA · 2026-08-24 · Transición material `SPEC-002-V3-20260824-01`: `VERIFYING` → `DONE (staging-verificado)`. Evidencia: IMPL-20260824-20, QA-20260824-09-SPEC-002-V3-20260824-01 `PASS_WITH_WARNINGS`, commit `4187aaa3984a012ca720ced4ac615ea4b617c35a`, deployment `b5w5roar7wngcpnbmlzkfdxc` `finished`, app `running:healthy`, SHA verificado, Playwright `30/30 PASS`. Warnings P3 conservados: (P3-1) compatibilidad futura Next 15, (P3-2) posible salto global headings `CardTitle`, (P3-3) selector E2E no fuerza toggle visible. No commit/push.
 
 ## Turno autónomo de cierre del sistema · `AUTONOMOUS-SYSTEM-20260824-01`
 

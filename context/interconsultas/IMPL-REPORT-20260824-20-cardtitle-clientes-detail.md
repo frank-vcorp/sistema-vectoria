@@ -3,7 +3,7 @@
 **ID intervención:** IMPL-20260824-20
 **ID tarea:** SPEC-002-V3-20260824-01
 **Origen handoff:** ATLAS
-**Estado:** READY_FOR_VERIFYING
+**Estado:** DONE (staging-verificado)
 **SPEC:** `context/SPECs/SPEC-20260817-002-clientes-prospectos.md` (v1.0)
 **ADRs vigentes:** ARCH-20260817-01 (stack), ARCH-20260819-03 (UI/responsive), ARCH-20260817-05 (autorización por recurso).
 
@@ -99,6 +99,14 @@ Sin cambios en infraestructura, manifiestos, contratos API, schema, migraciones,
   - `/clientes/00000000-0000-0000-0000-000000000077` → HTTP 200, sin `Application error` ✅
   - `/prospectos/00000000-0000-0000-0000-000000000077` → HTTP 200, sin `Application error` ✅
 
+## Verificación staging posterior
+
+- Commit publicado: `4187aaa3984a012ca720ced4ac615ea4b617c35a` (`fix: stabilize staging UI verification`).
+- Coolify se actualizó explícitamente a ese SHA; el pin anterior `fc40b44` hacía que el deployment manual reconstruyera el código antiguo.
+- Deployment: `b5w5roar7wngcpnbmlzkfdxc`, `finished`, SHA `4187aaa3984a012ca720ced4ac615ea4b617c35a`.
+- Aplicación: `running:healthy`; logs de deployment disponibles con token `Read sensitive data`.
+- Playwright staging V3: **30/30 PASS** en mobile-375, tablet-768 y desktop-1280 (11.3 s).
+
 ## Trazabilidad AC ↔ evidencia
 
 - **AC-9 (UI/responsive 375/768/1280):** headings de login/clientes/prospectos ahora son `h3` y matchean `getByRole("heading")` en los 3 viewports ✅.
@@ -121,10 +129,10 @@ Sin cambios en infraestructura, manifiestos, contratos API, schema, migraciones,
 - **Riesgo bajo**: nueva política de retry reduce de 3 a 1 el número de reintentos para errores transitorios (5xx/red). Cambio positivo: la página deja de esconderse 7 s ante 401, y un reintento sigue absorbiendo picos cortos de red.
 - **Riesgo bajo**: el test de navegación abre el drawer cuando el botón está visible (mobile + tablet). En desktop el botón no existe, así que el assert del dialog se omite (mismo comportamiento que antes para desktop). Ningún cambio funcional en la app; sólo en el test.
 - **Sin desviación funcional**: la rama de error/not-found, los mensajes y el orden de render se mantienen idénticos.
-- **Sin tocar:** `discovery/`, SPEC, ADR, `PROYECTO.md`, `context/CURRENT.md`, `tests/autonomous-loop/*`, lockfile, package.json, secretos, infra/Coolify.
+- **Sin tocar en la implementación:** SPEC, ADR, schema, migraciones, secretos y runtime de infraestructura. La documentación de estado se actualizó y Coolify recibió el deployment autorizado.
 
 ## Pendientes ATLAS (decisiones fuera de este incremento)
 
 1. **`prospectos/{id}`** cubierto en este incremento.
 2. **Otros defectos simétricos `React.use(params)` en la app**: el grep `React\.use\(params\)` muestra que ya no quedan más (verificado tras los cambios). Si aparecen más adelante con la migración a Next 15, este patrón de fix sirve de plantilla.
-3. **GEMINI**: el cambio en `providers.tsx` afecta a TODA la app (default retry policy). Aunque la política es local y conservadora, recomiendo gate GEMINI en el próximo cierre para confirmar que no hay tests de integración que dependan de los 3 reintentos por defecto sobre 4xx.
+3. **GEMINI**: gate final recomendado para revisar la política global de retry de `providers.tsx`; V3 web ya está en PASS.

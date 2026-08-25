@@ -1,20 +1,55 @@
 # PROYECTO.md · Vector IA Administración — Cola de ejecución técnica
 
-## TURNO AUTÓNOMO V1 · `AUTONOMOUS-V1-20260823-01`
+## INCREMENTO ACTIVO · `REBUILD-COOLIFY-20260824-02`
+
+| Campo | Valor |
+|---|---|---|
+| Estado | `DONE (local; pendiente-gate-V3-externo)` · WIP=0 |
+| Alcance | Provisionamiento base mínimo y operaciones Coolify directas bajo demanda |
+| Contrato | `context/SPECs/SPEC-20260824-003-minimal-base-provisioning.md` · `context/decisions/ADR-20260824-03-provisioning-vs-operations-api.md` |
+| Autorización | SOL→ATLAS, Frank, un solo uso |
+| Prohibido | commit/push/PR/deploy/staging mutante/producción/rollback/delete de recursos o datos/secretos/migraciones irreversibles |
+| Validación | Producto `641/641` y runner `386/386` PASS; implementación local lista para auditoría |
+| WIP único | Ninguno; `context/CURRENT.md` conserva el gate |
+| Evidencia | `context/decisions/ADR-20260824-03-provisioning-vs-operations-api.md` · `context/SPECs/SPEC-20260824-003-minimal-base-provisioning.md` |
+| Trazabilidad | `SPEC-20260824-001` · `ARCH-20260824-01` · `FND-20260824-01` |
+| Inventario | Cero consumidores legacy ejecutables; residuos textuales/históricos justificados en IMPL/QA |
+| Siguiente handoff | GEMINI/ATLAS para auditoría independiente; V3 externo queda separado |
+
+**DOC-20260824-05** · ATLAS · 2026-08-24 · MCP Coolify deshabilitado; API directa y skill global pasan a ser el camino operativo. Se creó y verificó online `Proyecto de prueba` con PostgreSQL y Garage (`running:healthy`). El runner experimental no se continúa parchando; `SPEC-20260824-003` queda READY sin WIP.
+
+**DOC-20260824-06** · ATLAS · 2026-08-24 · Inicio del turno autónomo `AUTONOMOUS-SYSTEM-20260824-01`, autorizado explícitamente por Frank, con alcance cerrado a terminar implementación local y validación del sistema existente. Presupuesto ≤6 sesiones/≤300 tools, sin ampliación de producto ni acciones destructivas.
+
+**DOC-20260824-07** · ATLAS · 2026-08-24 · SOFIA cerró implementación local en `IMPL-REPORT-20260824-18`: producto `641/641`, runner `386/386`, typecheck/build/diff/secret scan PASS. Estado material `VERIFYING`; pendiente auditoría independiente. V3 externo Coolify permanece separado y bloqueado.
+
+**DOC-20260824-08** · CRONISTA · 2026-08-24 · Transición documental `AUTONOMOUS-SYSTEM-20260824-01` / `REBUILD-COOLIFY-20260824-02`: `VERIFYING` → `DONE (local; pendiente-gate-V3-externo)`. QA `PASS_WITH_WARNINGS` (QA-20260824-08). V1/V2/typecheck/build/diff/secret scan PASS. Sin deploy, staging, producción, delete, rollback ni secretos. **Follow-ups P2 explícitos** (owner ATLAS, no bloquean el cierre local): (P2-1) allowlist `client.ts:29-30` incluye `/deploy` y `/deployments/{uuid}` contradictorio con SPEC-20260824-003 §Excluido — decidir retirar del allowlist o documentar como operación on demand separada con SPEC propia; (P2-2) maquinaria legacy huérfana (ensure.ts +1433 L, core/push/*, core/preflight/*) domina la suite runner 386/386 sin ser alcanzable desde `provision <manifest>` — decisión de limpieza/refactor de ATLAS. Gate V3 externo Coolify separado y `BLOCKED` con su propia evidencia. WIP=0.
+
+**DOC-20260824-09** · CRONISTA · 2026-08-24 · Transición material `SPEC-002-V3-20260824-01`: `VERIFYING` → `DONE (staging-verificado)`. Evidencia: IMPL-20260824-20 (implementación final), QA-20260824-09-SPEC-002-V3-20260824-01 `PASS_WITH_WARNINGS`, commit `4187aaa3984a012ca720ced4ac615ea4b617c35a`, deployment Coolify `b5w5roar7wngcpnbmlzkfdxc` `finished`, app `running:healthy`, SHA `4187aaa3984a012ca720ced4ac615ea4b617c35a` verificado, Playwright staging `30/30 PASS` (mobile-375/tablet-768/desktop-1280), V1/typecheck PASS, tests `641/641 PASS`, build PASS, ESLint afectados PASS. Warnings P3 conservados sin acción: (P3-1) compatibilidad futura Next 15, (P3-2) posible salto global headings `CardTitle`, (P3-3) selector E2E no fuerza toggle visible. No commit/push.
+
+**DOC-20260824-01** · CRONISTA · 2026-08-24 · Transición material de `MIGRATE-20260824-01`: `READY` → `VERIFYING`. V1/V2 PASS (`261/261`), QA `PASS_WITH_WARNINGS`; V3 N/A y prohibida. Se conserva el inventario `FND-20260824-01`, históricos y cambios preexistentes. No se ejecutaron deploy, staging mutante, commit, push ni PR.
+
+**DOC-20260824-02** · ATLAS · 2026-08-24 · Cierre operativo local de `MIGRATE-20260824-01`: implementación y validación local concluidas; runner `368/368 PASS`; documentación oficial Coolify revisada. El gate externo V3 permanece separado como `BLOCKED / NOT_YET_CERTIFIED` y no impide abrir un nuevo incremento funcional. No se declara staging certificado ni producción.
+
+**DOC-20260824-03** · ATLAS · 2026-08-24 · Reapertura autónoma explícita `AUTONOMOUS-V3-20260824-01`: resolver `coolify_version_unsupported:unknown`, ejecutar un único gate V3 no destructivo y cerrar sólo con deployment/SHA/health/Playwright verificables. Presupuesto ≤3 sesiones adicionales / ≤120 tools. No se inventan versiones ni se ejecutan reintentos ciegos.
+
+**DOC-20260824-04** · ATLAS · 2026-08-24 · El turno autónomo resolvió preflight, cadena ensure y propagación de SHA, pero quedó `BLOCKED`: Coolify aceptó `uqfhv7wtuka98whkv1jsjdd9` con SHA `b55f4e8...` y reportó `status=failed`; la app continúa `running:healthy`, pero Playwright encontró 404 en `/clientes` y `/prospectos`. No se declara V3 PASS. El duplicado `irj8...` queda intacto; cleanup requiere autorización destructiva separada.
+
+## TURNO AUTÓNOMO V1 · `AUTONOMOUS-V1-20260823-01` · CERRADO LOCALMENTE
 
 | Campo | Valor |
 |---|---|
 | Estado | `BLOCKED` · WIP=1 |
 | Inicio de medición | `2026-08-23T14:00:48-06:00` |
 | Cierre de medición | `2026-08-23T19:03:00-06:00` · DOC-20260823-01 |
-| Alcance cerrado | V1 completa SPEC-001..011: plataforma base + flujo prospección→cierre + suscripciones; sin mutaciones externas |
-| Permisos | Código, tests, documentación y comandos locales no destructivos; delegación interna |
-| Prohibido | commit/push/PR/merge, staging/deploy, producción, rollback/delete, migración irreversible, billing, secretos y datos externos |
+| Alcance cerrado | Resolver `PROVISION-V3-20260823-01` sin ampliar producto funcional y dejar staging verificable en el SHA solicitado |
+| Permisos | Implementación local, tests, documentación, un único deploy staging y migración/bootstrap/seed idempotentes dentro del handoff; commit/push sólo si el correctivo lo requiere y queda reportado |
+| Prohibido | PR/merge, producción, rollback/delete, billing, secretos, recreación de recursos, drops/resets, migración irreversible y reintentos ciegos |
 | Presupuesto | objetivo ≤8 sesiones / ≤500 tools · consumidas: 10 sesiones; umbral superado sólo para QA final/revalidación y transición material; revisión obligatoria ejecutada |
-| Criterio de cierre | V1 funcional local + gate V3 externo no autorizado → cierre local DONE (pendiente-gate-V3-externo) |
-| Estado actual | H2 resueltos: `task` operativo, `DISCOVERY-GAP-20260823-01` resuelto por `DEC-20260823-01`; SOFIA completó P-H-1 + SPEC-002..011 → `READY_FOR_VERIFYING`; GEMINI `QA-20260823-05` PASS_WITH_WARNINGS + `QA-20260823-06` revalidación PASS_WITH_WARNINGS (todos defectos QA-05 cerrados: P2-1/P3-1/P3-2/P3-3); 636/636 tests PASS; multitenancy 58/58 PASS; antipatterns 16/16 PASS; seed permissions PASS; V3 Playwright/BD/PostgreSQL/MinIO/PAC/secretos/staging bloqueados por gate externo único no autorizado |
+| Criterio de cierre | V1 dirigida + una única V2 completa + un único deploy staging observable + V3 independiente, o `BLOCKED` con evidencia exacta |
+| Estado actual | Gate V3 reanudado por autorización explícita de Frank. Preflight real fail-closed: `coolify_version_unsupported:unknown` (exit 4); cero deploy, cero `deployment_uuid`, cero V3. Staging sigue en `d090ae5`. QA: `context/reviews/QA-20260823-04-provision-v3-repair.md`. |
 | WIP único | `context/CURRENT.md` |
-| Bloqueador | **Gate V3 parcialmente habilitado:** app/DB/Garage staging saludables y `/api/health` operativo. V1 publicada hasta `4d6827a`, pero el contenedor continúa en `920d7dd` tras tres intentos de deploy; migración V1 aplicada (61 tablas), seed de Plataforma Base PASS, bootstrap incompleto por ausencia de `drizzle/meta/_journal.json` en el contenedor, catálogo V1/E2E pendientes. Incidente: seed legacy imprimió un enlace de invitación de un solo uso; no se repite ni se persiste, requiere revocación/rotación antes de onboarding. |
+| Bloqueador | `GET /servers/{serverUuid}` read-only no devuelve una versión parseable; no se inventa override ni se ejecutan rutas alternativas. |
+| Siguiente handoff | Resolver el canal soportado de version-probe y reabrir el único gate final; no declarar DONE. |
 
 ### Entregas del turno
 
@@ -46,7 +81,7 @@
 
 ### Punto de reanudación
 
-Gate V3 externo requiere autorización explícita de Frank para: provisioning de PostgreSQL + MinIO + secrets + `E2E_BASE_URL` + PAC CFDI de prueba + staging autorizado. Una vez autorizado, reanudar desde `context/CURRENT.md` sin recomenzar SPEC-001..011.
+Gate V3 externo queda limitado al handoff activo: no se solicitan nuevos secretos ni recursos; ejecutar sólo el correctivo local, V1/V2, un único deploy staging autorizado y V3 independiente, sin recomenzar SPEC-001..011.
 
 ---
 
