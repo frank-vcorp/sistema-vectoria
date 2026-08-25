@@ -500,7 +500,7 @@ export const messages = {
       "La cotización {code} pasó a estado accepted (BR-N237).",
     acceptPendingOsTitle: "OS pendiente (delegada)",
     acceptPendingOsBody:
-      "Esta UI no crea la Orden de Servicio todavía. La auditoría os.create_pending_from_quote queda delegada a SPEC-004, que la materializará desde el flujo OS. La cotización es inmutable.",
+      "Orden de Servicio: créala con la acción inferior; permanece en pending_deposit hasta asignar PL, capturar OC y completar el anticipo ≥90% (BR-N242/244). La cotización es inmutable.",
     // Etiquetas canónicas de estado (UI).
     statusLabel: {
       draft: "Borrador",
@@ -519,6 +519,30 @@ export const messages = {
     acceptedClientLabel: "Cliente enlazado",
     statusCanonicalNote:
       "Estado canónico: sólo lectura en este punto (BR-N02).",
+    // IMPL-20260825-27 (extensión) · Bloque "Crear Orden de Servicio"
+    // dentro de la tarjeta `accepted`. La acción invoca
+    // `trpc.ordenServicio.createFromAcceptedQuote` con
+    // `cotizacionId = q.id` (UUID real) y `anticipoRequiredCents`
+    // opcional (default null, MXN→centavos, validación no negativa).
+    createOsTitle: "Crear Orden de Servicio",
+    createOsSubtitle:
+      "La OS nace de esta cotización aceptada (BR-N242). Permiso requerido: gestionar_ordenes_servicio.",
+    createOsAction: "Crear Orden de Servicio",
+    createOsSubmitting: "Creando Orden de Servicio…",
+    createOsAnticipoLabel: "Anticipo requerido (MXN)",
+    createOsAnticipoPlaceholder: "0.00 (opcional)",
+    createOsAnticipoHelp:
+      "Monto en pesos mexicanos con 2 decimales. Vacío = sin anticipo. No se permiten valores negativos.",
+    createOsAnticipoInvalid: "Captura un número no negativo (MXN).",
+    createOsSuccessTitle: "Orden de Servicio creada",
+    createOsSuccessBody: "OS {code} creada desde la cotización {quoteCode}.",
+    createOsViewOrder: "Ver Orden de Servicio",
+    createOsErrorNoClient:
+      "La cotización aceptada requiere cliente asociado para crear la OS.",
+    createOsErrorAlreadyExists: "La cotización ya tiene una Orden de Servicio.",
+    createOsErrorForbidden:
+      "No tienes permisos para crear Órdenes de Servicio.",
+    createOsErrorGeneric: "No fue posible crear la Orden de Servicio.",
   },
   errors: {
     networkError: "Error de red. Verifica tu conexión.",

@@ -396,3 +396,319 @@ describe("IMPL-20260825-27 · SPEC-027 · smoke mock-driven del flujo de orden d
     expect(ensureIdx).toBeLessThan(updateAcceptedIdx);
   });
 });
+
+/**
+ * IMPL-20260825-27 (extensión) · Bloque UI "Crear Orden de Servicio"
+ * dentro de `cotizacion-detail.tsx`. Esta parte del incremento
+ * hace observable la creación OS; el backend de conversión ya está
+ * desplegado.
+ *
+ * Cobertura sin BD ni red (alineado con el resto de la suite):
+ *  - AC-9: La UI invoca `trpc.ordenServicio.createFromAcceptedQuote`
+ *    con `cotizacionId` = UUID real (prop `id`), NUNCA dummy.
+ *  - AC-10: Anticipo opcional, validado MXN no-negativo, default null.
+ *  - AC-11: Mapeo de errores: QUOTE_HAS_NO_CLIENT,
+ *    ORDER_ALREADY_EXISTS_FOR_QUOTE, FORBIDDEN/UNAUTHORIZED.
+ *  - AC-12: En éxito: muestra `pending_deposit`, order.id (UUID),
+ *    order.code (OS-NNNNN), enlace `/ordenes-servicio/{id}`.
+ *  - AC-13: En estados no accepted, NO se renderiza acción falsa.
+ *  - AC-14: Sin `window.prompt`/`confirm`/`alert` ni acceso a BD.
+ *  - AC-15: Items/totals/nota OS pending se conservan.
+ *  - AC-16: Accesibilidad: button `type="button"`, `disabled`,
+ *    `aria-busy`, errores con `role="alert"`, éxito con
+ *    `role="status"` + `aria-live="polite"`.
+ */
+describe("IMPL-20260825-27 (extensión) · UI 'Crear Orden de Servicio'", () => {
+  const ui = readSrc(DETAIL_PATH);
+
+  it("AC-9 · el bloque Crear OS vive DENTRO de la tarjeta accepted (no UI falsa en otros estados)", () => {
+    // El Card `cotizacion-detail-accepted` ya está condicionado
+    // por `q.status === "accepted"`; el nuevo sub-bloque vive
+    // dentro. La UI nunca renderiza el botón fuera de ese Card.
+    const acceptedCard = ui.match(
+      /data-testid=["']cotizacion-detail-accepted["'][\s\S]*?<\/Card>/,
+    );
+    expect(acceptedCard).not.toBeNull();
+    expect(
+      /data-testid=["']cotizacion-detail-create-os-block["']/.test(
+        acceptedCard![0],
+      ),
+    ).toBe(true);
+    expect(
+      /data-testid=["']cotizacion-detail-create-os["']/.test(
+        acceptedCard![0],
+      ),
+    ).toBe(true);
+  });
+
+  it("AC-9 · cotizacionId NUNCA es un UUID dummy (00000000-…, vacío, 'test', etc.)", () => {
+    // La mutación debe usar el UUID real (la prop `id`), no un
+    // placeholder. Defensivo: ninguna aparición de "00000000-…"
+    // como literal en `cotizacionId:` ni de strings dummy.
+    expect(/cotizacionId:\s*["']00000000-/.test(ui)).toBe(false);
+    expect(/cotizacionId:\s*["']dummy/.test(ui)).toBe(false);
+    expect(/cotizacionId:\s*["']test/.test(ui)).toBe(false);
+    expect(/cotizacionId:\s*["']""['"]?/.test(ui)).toBe(false);
+    // La asignación correcta: `cotizacionId: id` (prop UUID real)
+    // o `cotizacionId: q.id` (DTO cargado por byId). Aceptamos
+    // cualquiera de las dos; ambas son UUID real, no dummy.
+    expect(
+      /cotizacionId:\s*(id|q\.id)\b/.test(ui),
+    ).toBe(true);
+  });
+
+  it("AC-9 · llama el contrato correcto: trpc.ordenServicio.createFromAcceptedQuote", () => {
+    expect(
+      /trpc\.ordenServicio\.createFromAcceptedQuote\.useMutation/.test(ui),
+    ).toBe(true);
+  });
+
+  it("AC-10 · anticipo opcional con validación MXN no-negativa y default null", () => {
+    // Existe el helper `parseAnticipoToCents` con la regex
+    // canónica MXN (`/^\\d+(\\.\\d{1,2})?$/`).
+    expect(/function\s+parseAnticipoToCents\s*\(/.test(ui)).toBe(true);
+    expect(/\/\^\\d\+\(\\\.\\d\{1,2\}\)\?\$\//.test(ui)).toBe(true);
+    // Cadena vacía → null (default).
+    expect(
+      /if\s*\(\s*trimmed\.length\s*===\s*0\s*\)\s*return\s*\{\s*ok:\s*true,\s*value:\s*null/.test(
+        ui,
+      ),
+    ).toBe(true);
+    // Rechazo explícito de negativos.
+    expect(/pesos\s*<\s*0/.test(ui)).toBe(true);
+    // El Input se renderiza con `name="anticipoMxn"` y
+    // `inputMode="decimal"` (móvil: teclado numérico).
+    expect(
+      /name=["']anticipoMxn["']/.test(ui),
+    ).toBe(true);
+    expect(/inputMode=["']decimal["']/.test(ui)).toBe(true);
+    // En el envío, cuando el anticipo es null NO se incluye la
+    // clave (no se manda `anticipoRequiredCents: null`).
+    expect(
+      /\.\.\.\(parsed\.value\s*===\s*null\s*\?\s*\{\s*\}\s*:\s*\{\s*anticipoRequiredCents:\s*parsed\.value\s*\}\)/.test(
+        ui,
+      ),
+    ).toBe(true);
+  });
+
+  it("AC-10 · error de validación del anticipo se muestra con role=alert", () => {
+    // El bloque de error del anticipo lleva `role="alert"` y un
+    // data-testid estable para QA.
+    expect(
+      /role=["']alert["'][\s\S]{0,200}data-testid=["']cotizacion-detail-create-os-anticipo-error["']/.test(
+        ui,
+      ),
+    ).toBe(true);
+  });
+
+  it("AC-11 · mapeo de errores del backend (sin falso éxito)", () => {
+    // El patrón actual extrae `const code = err.data?.code ?? null`
+    // y compara con `code === "..."`. Aceptamos tanto la forma
+    // inline (`err.data?.code === "X"`) como la local (`code === "X"`).
+    const hasErrCode = (code: string): boolean =>
+      new RegExp(
+        `code\\s*===\\s*["']${code}["']`,
+      ).test(ui);
+    expect(hasErrCode("QUOTE_HAS_NO_CLIENT")).toBe(true);
+    expect(hasErrCode("ORDER_ALREADY_EXISTS_FOR_QUOTE")).toBe(true);
+    expect(hasErrCode("FORBIDDEN")).toBe(true);
+    expect(hasErrCode("UNAUTHORIZED")).toBe(true);
+    // Cada código mapea a un mensaje canónico estable.
+    expect(
+      /messages\.cotizaciones\.createOsErrorNoClient/.test(ui),
+    ).toBe(true);
+    expect(
+      /messages\.cotizaciones\.createOsErrorAlreadyExists/.test(ui),
+    ).toBe(true);
+    expect(
+      /messages\.cotizaciones\.createOsErrorForbidden/.test(ui),
+    ).toBe(true);
+    expect(
+      /messages\.cotizaciones\.createOsErrorGeneric/.test(ui),
+    ).toBe(true);
+    // El error se renderiza con role="alert" (no afirmación de éxito).
+    expect(
+      /role=["']alert["'][\s\S]{0,200}data-testid=["']cotizacion-detail-create-os-error["']/.test(
+        ui,
+      ),
+    ).toBe(true);
+  });
+
+  it("AC-12 · éxito muestra status pending_deposit, code OS-NNNNN, id UUID y enlace", () => {
+    // data-testid del bloque de éxito.
+    expect(
+      /data-testid=["']cotizacion-detail-create-os-success["']/.test(ui),
+    ).toBe(true);
+    // Status `pending_deposit` literal y label canónico.
+    expect(/messages\.ordenes\.pendingDeposit/.test(ui)).toBe(true);
+    expect(/createdOrder\.status/.test(ui)).toBe(true);
+    // Code real (no dummy).
+    expect(
+      /data-testid=["']cotizacion-detail-create-os-success-code["']/.test(
+        ui,
+      ),
+    ).toBe(true);
+    expect(/createdOrder\.code/.test(ui)).toBe(true);
+    // ID real (UUID) explícito y aislado.
+    expect(
+      /data-testid=["']cotizacion-detail-create-os-success-id["']/.test(ui),
+    ).toBe(true);
+    expect(/createdOrder\.id/.test(ui)).toBe(true);
+    // Enlace a /ordenes-servicio/{id} (ruta real del módulo).
+    expect(
+      /href=\{`\/ordenes-servicio\/\$\{createdOrder\.id\}`\}/.test(ui),
+    ).toBe(true);
+    expect(
+      /data-testid=["']cotizacion-detail-create-os-success-link["']/.test(
+        ui,
+      ),
+    ).toBe(true);
+    // El bloque de éxito usa role="status" + aria-live="polite"
+    // (anuncio no bloqueante para lectores de pantalla).
+    expect(
+      /role=["']status["'][\s\S]{0,80}aria-live=["']polite["']/.test(ui),
+    ).toBe(true);
+  });
+
+  it("AC-13 · la acción Crear OS NO se renderiza cuando el status no es accepted", () => {
+    // El botón vive dentro del Card condicionado por
+    // `q.status === "accepted"`. Adicionalmente `canCreateOs`
+    // exige `q.status === "accepted'` y la ausencia de un OS ya
+    // creada en la sesión.
+    const canCreateOsMatch = ui.match(
+      /const\s+canCreateOs\s*=\s*([^;]+);/,
+    );
+    expect(canCreateOsMatch).not.toBeNull();
+    // Tras el null check, `canCreateOsMatch` es RegExpMatchArray;
+    // TS aún infiere `string | undefined` para `match[1]`, así que
+    // usamos un alias tipado para evitar el cast en cada uso.
+    const matchArr = canCreateOsMatch as RegExpMatchArray;
+    const cond = matchArr[1] ?? "";
+    expect(/q\.status\s*===\s*["']accepted["']/.test(cond)).toBe(true);
+    // El botón se deshabilita al haber un createdOrder (idempotente).
+    expect(
+      /!!createdOrder/.test(cond) || /createdOrder/.test(cond),
+    ).toBe(true);
+    // `disabled={!canCreateOs}` (sin acción falsa).
+    expect(/disabled=\{!canCreateOs\}/.test(ui)).toBe(true);
+  });
+
+  it("AC-14 · la UI NO usa window.prompt / prompt / confirm / alert nativos", () => {
+    // Defensivo contra reintroducción de prompts nativos.
+    expect(/window\.prompt\s*\(/.test(ui)).toBe(false);
+    expect(/window\.confirm\s*\(/.test(ui)).toBe(false);
+    expect(/window\.alert\s*\(/.test(ui)).toBe(false);
+    // La palabra suelta `prompt(` (sin `window.` o como método
+    // suelto) tampoco debería aparecer.
+    expect(/(^|[^.\w])prompt\s*\(/.test(ui)).toBe(false);
+  });
+
+  it("AC-14 · la UI NO accede a BD ni importa módulos de server/db", () => {
+    // La UI consume tRPC; nunca debe importar Drizzle o la capa
+    // de persistencia directamente.
+    expect(/from\s+["']@\/server\/db\//.test(ui)).toBe(false);
+    expect(/from\s+["']drizzle-orm/.test(ui)).toBe(false);
+    expect(/getDb\s*\(/.test(ui)).toBe(false);
+  });
+
+  it("AC-15 · items/totals se conservan (no se removieron Cards existentes)", () => {
+    // Cards de ítems y totales siguen presentes tras el cambio.
+    expect(
+      /cotizacion-detail-items|cotizacion-detail-totals|itemsTitle|itemsTitle/.test(
+        ui,
+      ),
+    ).toBe(true);
+    // Etiqueta de totales intacta.
+    expect(/messages\.cotizaciones\.totalsTitle/.test(ui)).toBe(true);
+  });
+
+  it("AC-15 · la nota OS pending sigue presente con data-testid estable", () => {
+    expect(
+      /data-testid=["']cotizacion-detail-accepted-pending-os["']/.test(ui),
+    ).toBe(true);
+    expect(
+      /messages\.cotizaciones\.acceptPendingOsTitle/.test(ui),
+    ).toBe(true);
+    expect(
+      /messages\.cotizaciones\.acceptPendingOsBody/.test(ui),
+    ).toBe(true);
+  });
+
+  it("AC-16 · accesibilidad: button accesible, aria-busy, role=alert / role=status", () => {
+    // Botón accesible.
+    const buttonMatch = ui.match(
+      /<Button[\s\S]*?data-testid=["']cotizacion-detail-create-os["'][\s\S]*?\/>/,
+    );
+    expect(buttonMatch).not.toBeNull();
+    expect(/type=["']button["']/.test(buttonMatch![0])).toBe(true);
+    expect(/disabled=\{!canCreateOs\}/.test(buttonMatch![0])).toBe(true);
+    expect(
+      /aria-busy=\{createOsMutation\.isPending\s*\?\s*true\s*:\s*undefined\}/.test(
+        buttonMatch![0],
+      ),
+    ).toBe(true);
+    // Errores accesibles.
+    expect(/role=["']alert["']/.test(ui)).toBe(true);
+    // Éxito accesible.
+    expect(/role=["']status["']/.test(ui)).toBe(true);
+    // Labels asociados a Inputs (`htmlFor` + `id`).
+    expect(
+      /htmlFor=["']cotizacion-detail-create-os-anticipo["']/.test(ui),
+    ).toBe(true);
+    expect(
+      /id=["']cotizacion-detail-create-os-anticipo["']/.test(ui),
+    ).toBe(true);
+  });
+
+  it("AC-16 · la deshabilitación del Input evita edición mientras hay OS creada o pending", () => {
+    const inputMatch = ui.match(
+      /<Input[\s\S]*?data-testid=["']cotizacion-detail-create-os-anticipo["'][\s\S]*?\/>/,
+    );
+    expect(inputMatch).not.toBeNull();
+    expect(
+      /disabled=\{createOsMutation\.isPending\s*\|\|\s*!!createdOrder\}/.test(
+        inputMatch![0],
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("IMPL-20260825-27 (extensión) · catálogo canónico de mensajes createOs", () => {
+  it("existen todas las etiquetas esperadas en messages.cotizaciones", () => {
+    const msgs = readSrc(MESSAGES_PATH);
+    const expected: string[] = [
+      "createOsTitle",
+      "createOsSubtitle",
+      "createOsAction",
+      "createOsSubmitting",
+      "createOsAnticipoLabel",
+      "createOsAnticipoPlaceholder",
+      "createOsAnticipoHelp",
+      "createOsAnticipoInvalid",
+      "createOsSuccessTitle",
+      "createOsSuccessBody",
+      "createOsViewOrder",
+      "createOsErrorNoClient",
+      "createOsErrorAlreadyExists",
+      "createOsErrorForbidden",
+      "createOsErrorGeneric",
+    ];
+    for (const k of expected) {
+      expect(msgs.includes(`${k}:`)).toBe(true);
+    }
+  });
+
+  it("la nota OS pending cita BR-N242 y BR-N244 como referencia de negocio", () => {
+    const msgs = readSrc(MESSAGES_PATH);
+    // El mensaje cita BR-N242 (creación de OS desde cotización
+    // aceptada) y BR-N244 (anticipo ≥90% como precondición). El
+    // body actual usa la forma combinada `BR-N242/244`; aceptamos
+    // ambas formas (separadas o conjuntas) para no romper el test
+    // ante cambios de formato en el mensaje.
+    const cites242 = /BR-N242/.test(msgs);
+    const cites244 =
+      /BR-N244/.test(msgs) || /BR-N242\/244/.test(msgs);
+    expect(cites242).toBe(true);
+    expect(cites244).toBe(true);
+  });
+});

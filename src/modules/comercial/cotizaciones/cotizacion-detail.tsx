@@ -1,9 +1,12 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { messages } from "@/shared/utils";
 import { AcceptCotizacionDialog } from "./accept-cotizacion-dialog";
 
@@ -13,7 +16,7 @@ import { AcceptCotizacionDialog } from "./accept-cotizacion-dialog";
  *  - Advertencia presupuestal (BR-N411, AC-12) si `total >
  *    1.5 × presupuesto_declarado` — bloque amarillo visible con
  *    ambos montos (paridad responsive, AC-10).
- *  - Acciones operables (IMPL-20260825-25):
+ *  - Acciones operables (IMPL-20260825-25, IMPL-20260825-27):
  *      · `Enviar cotización` sólo en `draft` → `cotizaciones.send`
  *        con `{ quoteId }`. En cualquier otro estado NO se muta
  *        `send` (la UI sólo renderiza el botón cuando status='draft').
@@ -22,13 +25,23 @@ import { AcceptCotizacionDialog } from "./accept-cotizacion-dialog";
  *        `cotizaciones.accept` con los valores reales (incluye
  *        `evidenceFileId` UUID obligatorio, sin UUID dummy).
  *      · En `accepted` se muestran los datos de aceptación
- *        (inmutable, BR-N02) y el aviso de OS pendiente/delegada
- *        a SPEC-004.
+ *        (inmutable, BR-N02), el cliente enlazado, el aviso de OS
+ *        pendiente (ahora accionable) y el botón `Crear Orden de
+ *        Servicio` que invoca
+ *        `trpc.ordenServicio.createFromAcceptedQuote({ cotizacionId:
+ *        q.id, anticipoRequiredCents })`. El `cotizacionId` es el
+ *        UUID real (nunca dummy); el anticipo es opcional y validado
+ *        como número MXN no negativo (default null).
  *      · En estados incompatibles (`internal_review`, `rejected`,
  *        `expired`, `cancelled`) se muestra el estado canónico en
- *        sólo lectura — sin botones de envío/aceptación.
+ *        sólo lectura — sin botones de envío/aceptación/OS.
  *  - Mensajes canónicos en `messages.cotizaciones.*`; errores con
  *    `role="alert"`; nunca `window.prompt` ni acceso a BD directa.
+ *
+ * Validación local del anticipo: cadena MXN con hasta 2 decimales;
+ * vacío → null. Rechaza negativos, NaN, o > 2 decimales. La
+ * validación definitiva (defensa en profundidad) vive en el
+ * servicio `orders.createFromAcceptedQuote` (BR-N244/242).
  */
 function fmtMXN(cents: number): string {
   const pesos = Math.round(cents) / 100;
@@ -71,6 +84,19 @@ export function CotizacionDetail({ id }: { id: string }) {
 
   const [acceptOpen, setAcceptOpen] = React.useState(false);
   const [sendError, setSendError] = React.useState<string | null>(null);
+  // IMPL-20260825-27 (extensión) · Anticipo opcional para la OS.
+  // Cadena MXN que se valida y convierte a centavos antes de
+  // enviar al backend. Vacío → null.
+  const [anticipoInput, setAnticipoInput] = React.useState<string>("");
+  const [anticipoError, setAnticipoError] = React.useState<string | null>(null);
+  // Resultado de la creación: OrderDTO completo del backend
+  // (status `pending_deposit`, code `OS-NNNNN`, id UUID real).
+  const [createdOrder, setCreatedOrder] = React.useState<{
+    id: string;
+    code: string;
+    status: string;
+  } | null>(null);
+  const [createOsError, setCreateOsError] = React.useState<string | null>(null);
 
   const sendMutation = trpc.comercial.cotizaciones.send.useMutation({
     onError: (err) => {
@@ -89,6 +115,42 @@ export function CotizacionDetail({ id }: { id: string }) {
       setSendError(null);
       // Refresca el detalle para que el padre observe el nuevo status.
       await utils.comercial.cotizaciones.byId.invalidate({ id });
+    },
+  });
+
+  // IMPL-20260825-27 (extensión) · Crear OS desde cotización aceptada.
+  // El `cotizacionId` es el UUID real `q.id` (nunca dummy). El
+  // `anticipoRequiredCents` se calcula en MXN→centavos en cliente
+  // y es validado además por el servicio (defensa en profundidad).
+  const createOsMutation = trpc.ordenServicio.createFromAcceptedQuote.useMutation({
+    onError: (err) => {
+      setCreatedOrder(null);
+      const code = err.data?.code ?? null;
+      if (code === "QUOTE_HAS_NO_CLIENT") {
+        setCreateOsError(messages.cotizaciones.createOsErrorNoClient);
+        return;
+      }
+      if (code === "ORDER_ALREADY_EXISTS_FOR_QUOTE") {
+        setCreateOsError(messages.cotizaciones.createOsErrorAlreadyExists);
+        return;
+      }
+      if (code === "FORBIDDEN" || code === "UNAUTHORIZED") {
+        setCreateOsError(messages.cotizaciones.createOsErrorForbidden);
+        return;
+      }
+      setCreateOsError(
+        err.message ?? messages.cotizaciones.createOsErrorGeneric,
+      );
+    },
+    onSuccess: (order) => {
+      setCreateOsError(null);
+      setAnticipoInput("");
+      setAnticipoError(null);
+      setCreatedOrder({
+        id: order.id,
+        code: order.code,
+        status: order.status,
+      });
     },
   });
 
@@ -114,11 +176,57 @@ export function CotizacionDetail({ id }: { id: string }) {
   // `sent` o `negotiation`. En `accepted` es inmutable (BR-N02); en
   // `internal_review | rejected | expired | cancelled` no aplica.
   const canAccept = q.status === "sent" || q.status === "negotiation";
+  // IMPL-20260825-27 (extensión) · Acción `Crear Orden de Servicio`
+  // sólo visible en `accepted` y mientras no haya una OS creada en
+  // esta sesión (idempotencia observable desde la UI). En cualquier
+  // otro estado no se renderiza nada falso.
+  const canCreateOs =
+    q.status === "accepted" && !createdOrder && !createOsMutation.isPending;
 
   function onSend() {
     setSendError(null);
     if (!canSend) return;
     sendMutation.mutate({ quoteId: id });
+  }
+
+  /**
+   * IMPL-20260825-27 (extensión) · Parsea la cadena MXN del input a
+   * centavos (`number`) o `null` cuando está vacío. Rechaza números
+   * negativos, NaN, o con más de 2 decimales. La validación
+   * definitiva la hace el servicio (`orders.createFromAcceptedQuote`).
+   */
+  function parseAnticipoToCents(raw: string): { ok: true; value: number | null } | { ok: false; reason: string } {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return { ok: true, value: null };
+    // Sólo dígitos y un único punto con hasta 2 decimales.
+    if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) {
+      return { ok: false, reason: "MXN" };
+    }
+    const pesos = Number(trimmed);
+    if (!Number.isFinite(pesos) || pesos < 0) {
+      return { ok: false, reason: "NEG" };
+    }
+    return { ok: true, value: Math.round(pesos * 100) };
+  }
+
+  function onCreateOs() {
+    setCreateOsError(null);
+    if (!canCreateOs) return;
+    const parsed = parseAnticipoToCents(anticipoInput);
+    if (!parsed.ok) {
+      setAnticipoError(messages.cotizaciones.createOsAnticipoInvalid);
+      return;
+    }
+    setAnticipoError(null);
+    // `cotizacionId` es el UUID real de la cotización aceptada
+    // (la prop `id` del componente). `anticipoRequiredCents`
+    // puede ser null (sin anticipo).
+    createOsMutation.mutate({
+      cotizacionId: id,
+      ...(parsed.value === null
+        ? {}
+        : { anticipoRequiredCents: parsed.value }),
+    });
   }
 
   return (
@@ -324,6 +432,141 @@ export function CotizacionDetail({ id }: { id: string }) {
                 {messages.cotizaciones.acceptPendingOsTitle}
               </p>
               <p>{messages.cotizaciones.acceptPendingOsBody}</p>
+            </div>
+            {/* IMPL-20260825-27 (extensión) · Bloque "Crear Orden de
+                Servicio". Sólo se renderiza dentro de la tarjeta
+                `accepted` (este `<Card>` ya está condicionado por
+                `q.status === "accepted"`); en cualquier otro estado
+                la UI NO muestra acción falsa. */}
+            <div
+              className="mt-3 space-y-2 border-t pt-3"
+              data-testid="cotizacion-detail-create-os-block"
+            >
+              <div>
+                <p className="text-sm font-medium">
+                  {messages.cotizaciones.createOsTitle}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {messages.cotizaciones.createOsSubtitle}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="cotizacion-detail-create-os-anticipo">
+                  {messages.cotizaciones.createOsAnticipoLabel}
+                </Label>
+                <Input
+                  id="cotizacion-detail-create-os-anticipo"
+                  name="anticipoMxn"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={
+                    messages.cotizaciones.createOsAnticipoPlaceholder
+                  }
+                  value={anticipoInput}
+                  onChange={(e) => {
+                    setAnticipoInput(e.target.value);
+                    if (anticipoError) setAnticipoError(null);
+                  }}
+                  aria-describedby="cotizacion-detail-create-os-anticipo-help"
+                  aria-invalid={anticipoError ? true : undefined}
+                  data-testid="cotizacion-detail-create-os-anticipo"
+                  disabled={createOsMutation.isPending || !!createdOrder}
+                />
+                <p
+                  id="cotizacion-detail-create-os-anticipo-help"
+                  className="text-xs text-muted-foreground"
+                >
+                  {messages.cotizaciones.createOsAnticipoHelp}
+                </p>
+                {anticipoError ? (
+                  <p
+                    role="alert"
+                    className="text-xs text-destructive"
+                    data-testid="cotizacion-detail-create-os-anticipo-error"
+                  >
+                    {anticipoError}
+                  </p>
+                ) : null}
+              </div>
+              <Button
+                type="button"
+                onClick={onCreateOs}
+                disabled={!canCreateOs}
+                aria-busy={createOsMutation.isPending ? true : undefined}
+                data-testid="cotizacion-detail-create-os"
+              >
+                {createOsMutation.isPending
+                  ? messages.cotizaciones.createOsSubmitting
+                  : messages.cotizaciones.createOsAction}
+              </Button>
+              {createOsError ? (
+                <p
+                  role="alert"
+                  className="text-sm text-destructive"
+                  data-testid="cotizacion-detail-create-os-error"
+                >
+                  {createOsError}
+                </p>
+              ) : null}
+              {createdOrder ? (
+                <div
+                  className="mt-2 rounded-md border border-emerald-300 bg-emerald-50 p-2 text-xs text-emerald-900"
+                  role="status"
+                  aria-live="polite"
+                  data-testid="cotizacion-detail-create-os-success"
+                >
+                  <p className="font-medium">
+                    {messages.cotizaciones.createOsSuccessTitle}
+                  </p>
+                  <p className="mt-1">
+                    {messages.cotizaciones.createOsSuccessBody
+                      .replace("{code}", createdOrder.code)
+                      .replace("{quoteCode}", q.code)}
+                  </p>
+                  <p className="mt-1">
+                    <span className="text-muted-foreground">
+                      {messages.ordenes.status}:{" "}
+                    </span>
+                    <span
+                      className="font-mono"
+                      data-testid="cotizacion-detail-create-os-success-status"
+                    >
+                      {messages.ordenes.pendingDeposit} ({createdOrder.status})
+                    </span>
+                  </p>
+                  <p className="mt-1">
+                    <span className="text-muted-foreground">
+                      {messages.ordenes.code}:{" "}
+                    </span>
+                    <span
+                      className="font-mono"
+                      data-testid="cotizacion-detail-create-os-success-code"
+                    >
+                      {createdOrder.code}
+                    </span>
+                  </p>
+                  <p className="mt-1">
+                    <span className="text-muted-foreground">
+                      {messages.ordenes.client} (OS):{" "}
+                    </span>
+                    <span
+                      className="font-mono text-xs"
+                      data-testid="cotizacion-detail-create-os-success-id"
+                    >
+                      {createdOrder.id}
+                    </span>
+                  </p>
+                  <p className="mt-2">
+                    <Link
+                      href={`/ordenes-servicio/${createdOrder.id}`}
+                      className="underline"
+                      data-testid="cotizacion-detail-create-os-success-link"
+                    >
+                      {messages.cotizaciones.createOsViewOrder}
+                    </Link>
+                  </p>
+                </div>
+              ) : null}
             </div>
           </CardContent>
         </Card>

@@ -1345,12 +1345,16 @@ describe("IMPL-20260825-25 · CotizacionDetail · botón Aceptar en sent | negot
     expect(/acceptedAtLabel/.test(src)).toBe(true);
     expect(/acceptedByProxyLabel/.test(src)).toBe(true);
     expect(/acceptedEvidenceLabel/.test(src)).toBe(true);
-    // Aviso explícito de OS pendiente/delegada a SPEC-004 (NO se
-    // oculta que no se crea OS en este corte).
+    // Aviso explícito de OS pendiente con la acción inferior. Desde
+    // IMPL-20260825-27 (extensión) el botón Crear OS vive dentro
+    // de esta misma tarjeta: la UI ya no delega a SPEC-004, crea
+    // la OS vía `createFromAcceptedQuote` (BR-N242). Mantenemos
+    // el slot visual y el data-testid estable.
     expect(/cotizacion-detail-accepted-pending-os/.test(src)).toBe(true);
     expect(/acceptPendingOsTitle/.test(src)).toBe(true);
     expect(/acceptPendingOsBody/.test(src)).toBe(true);
-    expect(/SPEC-004/.test(src)).toBe(true);
+    expect(/createFromAcceptedQuote/.test(src)).toBe(true);
+    expect(/cotizacion-detail-create-os/.test(src)).toBe(true);
     // La card indica inmutabilidad (BR-N02).
     expect(/statusCanonicalNote/.test(src)).toBe(true);
   });
