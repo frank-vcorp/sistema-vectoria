@@ -286,7 +286,7 @@ export function CreateCotizacionDialog({
       setValidationError(messages.cotizaciones.createMinValidityError);
       return;
     }
-    const minValid = addDays(new Date(), MIN_VALIDITY_DAYS - 1); // >=7d desde hoy
+    const minValid = addDays(new Date(), MIN_VALIDITY_DAYS); // >=7d desde hoy (BR-N235)
     if (localDate.getTime() < minValid.getTime()) {
       setValidationError(messages.cotizaciones.createMinValidityError);
       return;

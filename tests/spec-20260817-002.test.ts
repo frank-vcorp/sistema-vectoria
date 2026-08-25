@@ -496,6 +496,19 @@ function readCreateCotizacionDialog(): string {
   return _readFileSync(CREATE_COTIZACION_DIALOG_PATH, "utf8");
 }
 
+const QUOTES_SERVICE_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "server",
+  "services",
+  "comercial",
+  "quotes.ts",
+);
+function readQuotesService(): string {
+  return _readFileSync(QUOTES_SERVICE_PATH, "utf8");
+}
+
 async function readMessages(): Promise<unknown> {
   // Import estático a través del loader TS de Vitest; permite verificar
   // el catálogo de mensajes sin transpilación manual.
@@ -992,7 +1005,11 @@ describe("IMPL-20260825-24 · CreateCotizacionDialog consulta catálogo activo y
   it("exige vigencia >=7 días en cliente (BR-N235) y nunca afirma éxito sin id/code reales", () => {
     const src = readCreateCotizacionDialog();
     expect(/MIN_VALIDITY_DAYS\s*=\s*7/.test(src)).toBe(true);
-    expect(/addDays\(\s*new Date\(\)\s*,\s*MIN_VALIDITY_DAYS\s*-\s*1\s*\)/.test(src)).toBe(true);
+    // IMPL-20260825-24 · FIX off-by-one: la fecha de vigencia mínima es
+    // exactamente `now + QUOTE_MIN_VALIDITY_DAYS` (7d), NO 6d. El
+    // backend en `meetsMinimumValidity` exige `diffDays >= 7`.
+    expect(/addDays\(\s*new Date\(\)\s*,\s*MIN_VALIDITY_DAYS\s*\)/.test(src)).toBe(true);
+    expect(src).not.toMatch(/addDays\([\s\S]*?MIN_VALIDITY_DAYS\s*-\s*1/);
     expect(/createMinValidityError/.test(src)).toBe(true);
     // Si el backend no devuelve id o code, NO se afirma éxito: se
     // expone mensaje canónico de error.
@@ -1045,5 +1062,86 @@ describe("IMPL-20260825-24 · CreateCotizacionDialog consulta catálogo activo y
     )).toBe(true);
     expect(/create-cotizacion-success/.test(src)).toBe(true);
     expect(/createOpenLink/.test(src)).toBe(true);
+  });
+});
+
+/**
+ * IMPL-20260825-24 · IMPLEMENTATION_DEFECT · fix de causa raíz
+ * reportada por QA-20260825-24:
+ *
+ *   - `loadQuote(row.id, user.organization_id)` dentro de
+ *     `quotes.create`'s `withTx` invertía argumentos (firma correcta:
+ *     `loadQuote(orgId, quoteId)`).
+ *   - `loadQuote`/`loadItems` leían del executor `db` global mientras
+ *     el insert vivía en `tx` sin commit → 404 QUOTE_NOT_FOUND +
+ *     rollback de la transacción.
+ *
+ * Cobertura estática (sin harness PostgreSQL en el repo). Cada
+ * describe asegura que el patrón NO vuelva a aparecer y que el
+ * executor transaccional se propague correctamente. La validación
+ * funcional end-to-end queda en el gate V3 de GEMINI contra el
+ * backend provisionado.
+ */
+describe("IMPL-20260825-24 · FIX IMPLEMENTATION_DEFECT · quotes.ts · loadQuote usa tx y orden correcto", () => {
+  it("loadQuote acepta un tercer argumento executor (default `db`) para usar tx dentro de withTx", () => {
+    const src = readQuotesService();
+    // Firma ampliada con `executor` por defecto `db`.
+    expect(
+      /async function loadQuote\(\s*orgId:\s*string\s*,\s*quoteId:\s*string\s*,\s*executor:[\s\S]*?=\s*db/.test(
+        src,
+      ),
+    ).toBe(true);
+    expect(
+      /async function loadItems\(\s*orgId:\s*string\s*,\s*quoteId:\s*string\s*,\s*executor:[\s\S]*?=\s*db/.test(
+        src,
+      ),
+    ).toBe(true);
+    // loadQuote usa el executor (no el `db` literal) en su select.
+    expect(/await executor\s*\.\s*select\(\)\s*\.\s*from\(quotes\)/.test(src)).toBe(true);
+    expect(/await executor\s*\.\s*select\(\)\s*\.\s*from\(quoteItems\)/.test(src)).toBe(true);
+    // loadItems se llama pasando el mismo executor (no el `db` global).
+    expect(/loadItems\(\s*orgId\s*,\s*quoteId\s*,\s*executor\s*\)/.test(src)).toBe(true);
+  });
+
+  it("ninguna llamada a loadQuote/loadItems invierte el orden (orgId, quoteId)", () => {
+    const src = readQuotesService();
+    // Anti-patrón conocido: `loadQuote(row.id, user.organization_id)`
+    // (es decir, quoteId primero). Si reaparece, el test falla.
+    expect(src).not.toMatch(/loadQuote\(\s*\w+\.id\s*,\s*\w+\.organization_id/);
+    // No debe haber loadItems con orden invertido.
+    expect(src).not.toMatch(/loadItems\(\s*\w+\.id\s*,\s*\w+\.organization_id/);
+  });
+
+  it("todas las llamadas a loadQuote dentro de withTx pasan `tx` como tercer argumento", () => {
+    const src = readQuotesService();
+    // Extrae los cuerpos de cada callback de withTx y verifica que
+    // cada `return loadQuote(...)` que aparezca termine con `, tx)`.
+    const blocks = src.match(/return withTx\(async\s*\(tx\)\s*=>\s*\{[\s\S]*?\}\);/g) ?? [];
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks) {
+      const calls = block.match(/loadQuote\(/g) ?? [];
+      for (const c of calls) {
+        // Cada invocación debe ser exactamente `loadQuote(orgId, quoteId, tx)`.
+        expect(
+          /loadQuote\([\s\S]*?,\s*tx\s*\)/.test(block.slice(block.indexOf(c))),
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("los call-sites fuera de withTx (getById, listForProspect) usan el executor por defecto `db`", () => {
+    const src = readQuotesService();
+    // getById: loadQuote(orgId, quoteId) sin tercer argumento → usa `db`.
+    expect(
+      /async function getById[\s\S]*?return\s+loadQuote\(\s*user\.organization_id\s*,\s*quoteId\s*\)\s*;/.test(
+        src,
+      ),
+    ).toBe(true);
+    // listForProspect: loadItems(orgId, r.id) sin tercer argumento.
+    expect(
+      /const items\s*=\s*await\s+loadItems\(\s*user\.organization_id\s*,\s*r\.id\s*\)/.test(
+        src,
+      ),
+    ).toBe(true);
   });
 });

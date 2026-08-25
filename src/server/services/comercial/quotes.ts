@@ -269,8 +269,9 @@ export function createQuotesService(): QuotesService {
   async function loadItems(
     orgId: string,
     quoteId: string,
+    executor: ReturnType<typeof getDb> = db,
   ): Promise<QuoteItemDTO[]> {
-    const rows = await db
+    const rows = await executor
       .select()
       .from(quoteItems)
       .where(
@@ -402,12 +403,16 @@ export function createQuotesService(): QuotesService {
           totalCents: row.totalCents,
         },
       });
-      return loadQuote(row.id, user.organization_id);
+      return loadQuote(user.organization_id, row.id, tx);
     });
   }
 
-  async function loadQuote(orgId: string, quoteId: string): Promise<QuoteDTO> {
-    const [row] = await db
+  async function loadQuote(
+    orgId: string,
+    quoteId: string,
+    executor: ReturnType<typeof getDb> = db,
+  ): Promise<QuoteDTO> {
+    const [row] = await executor
       .select()
       .from(quotes)
       .where(
@@ -417,7 +422,7 @@ export function createQuotesService(): QuotesService {
     if (!row) {
       throw new DomainError("QUOTE_NOT_FOUND", "Cotización no encontrada", 404);
     }
-    const items = await loadItems(orgId, quoteId);
+    const items = await loadItems(orgId, quoteId, executor);
     return quoteToDto(row, items);
   }
 
@@ -516,7 +521,7 @@ export function createQuotesService(): QuotesService {
         before: { version: before.version, totalCents: before.totalCents },
         after: { version: after.version, totalCents: after.totalCents },
       });
-      return loadQuote(user.organization_id, input.quoteId);
+      return loadQuote(user.organization_id, input.quoteId, tx);
     });
   }
 
@@ -611,7 +616,7 @@ export function createQuotesService(): QuotesService {
           totalCents: after.totalCents,
         },
       });
-      return loadQuote(user.organization_id, input.quoteId);
+      return loadQuote(user.organization_id, input.quoteId, tx);
     });
   }
 
@@ -717,7 +722,7 @@ export function createQuotesService(): QuotesService {
         before: { status: before.status },
         after: { status: after.status },
       });
-      return loadQuote(user.organization_id, quoteId);
+      return loadQuote(user.organization_id, quoteId, tx);
     });
   }
 
@@ -908,7 +913,7 @@ export function createQuotesService(): QuotesService {
           delegatedTo: "SPEC-004 (orders.createFromAcceptedQuote)",
         },
       });
-      return loadQuote(user.organization_id, input.quoteId);
+      return loadQuote(user.organization_id, input.quoteId, tx);
     });
   }
 
