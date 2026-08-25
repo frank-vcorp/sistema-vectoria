@@ -1,6 +1,6 @@
 # INDEX · Vector IA — Discovery funcional
 
-**Versión:** 2026-08-20
+**Versión:** 2026-08-24
 **Estado:** `ready_for_integra`; la frontera Productos/Servicios, la política de roles base y la dirección visual están cerradas: toda oferta crea Proyecto, los roles seed siguen A1/B1/C1 y la UI usa Tailwind + shadcn/ui con tema VectorIA y paridad operativa en móvil, tableta y escritorio.
 **Fuente funcional única:** `discovery/FUNCTIONAL-BASELINE.md` v1.12
 
@@ -23,6 +23,9 @@ El discovery funcional está consolidado, sin contradicciones P0 ni preguntas bl
 | `PREGUNTAS-ABIERTAS.md` | Cero preguntas bloqueantes; `DISCOVERY-GAP-20260823-01` resuelto; Q-NB-3 resuelta | READY |
 | `SIMULACIONES.md` | Índice y estado de simulaciones | READY |
 | `OPEN-QUESTIONS.md` | Control de contaminación operativa | READY |
+| `HALLAZGOS.md` § FND-20260824-01 | Inventario dirigido del cutover legacy→runtime | candidate; gate de implementación |
+| `HALLAZGOS.md` § FND-20260824-02 | Drift contrato Coolify observado→runner | candidate; P0 V3; requiere decisión técnica |
+| `HALLAZGOS.md` § FND-20260824-03 | REST Coolify omite logs de build en la respuesta observada | confirmed; P1 observabilidad V3 |
 
 ---
 

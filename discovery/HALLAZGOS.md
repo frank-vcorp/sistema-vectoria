@@ -7,6 +7,56 @@
 
 ---
 
+## FND-20260824-03 · Coolify REST omite logs de build en la respuesta observada
+
+**Tipo:** `FINDING` · **Estado:** `confirmed` · **Severidad:** P1 para observabilidad V3
+
+**Evidencia real (2026-08-24):** la documentación oficial de `GET /api/v1/deployments/{uuid}` declara un campo de respuesta `logs: string`. Sin embargo, con el token read-only vigente, la instancia Coolify Cloud responde HTTP 200 para los deployments consultados y omite completamente ese campo. El deployment fallido `nc3vizuxdv64tgnkjjqwzhhz` devuelve `status=failed` sin causa ni logs; el deployment exitoso `nl1iemnkttidw3bsnk4i6vik` devuelve `status=finished` sin logs. `GET /api/v1/deployments/applications/{applicationUuid}` devuelve el historial (14 deployments) también sólo con metadatos. `GET /api/v1/applications/{applicationUuid}/logs` sí responde HTTP 200 y devuelve 2075 caracteres, pero corresponde a logs runtime de la aplicación, no al build/deploy fallido.
+
+**Determinación confirmada (2026-08-24):** Frank tenía razón: el contrato documentado y el cliente `coolify_ex` confirman que los logs se obtienen del mismo endpoint `GET /deployments/{uuid}` y se leen del campo `.logs`; no existe un endpoint alternativo en ese cliente. El token anterior sólo tenía `Read`, por lo que Coolify devolvía HTTP 200 y metadatos, pero omitía el campo sensible `logs`. Tras crear un token adicional con `Read` + `Read sensitive data`, el mismo endpoint devuelve `.logs` para deployments fallidos y exitosos.
+
+**Impacto:** con `Read sensitive data`, la API permite recuperar directamente los errores de Nixpacks/build y correlacionarlos con UUID, estado, commit y timestamps. El deployment fallido `nc3vizuxdv64tgnkjjqwzhhz` devuelve 83.173 caracteres de logs; el exitoso `nl1iemnkttidw3bsnk4i6vik`, 45.668.
+
+**Regla operativa:** conservar la correlación REST deployment/SHA/health y marcar `BLOCKED` cuando un fallo requiera causa de build no disponible por API. No añadir endpoints inventados, no reintentar deploy ciegamente y no usar SSH/Docker sin autorización separada.
+
+## FND-20260824-02 · Drift entre contrato documental Coolify y runner ejecutable
+
+**Tipo:** `FINDING` · **Estado:** `resolved` · **Severidad:** P0 para V3
+
+**Evidencia observada:** el canal de conexión y autenticación funciona: el preflight real pasa, los recursos se leen, `ensure_*` adopta los UUID existentes y Coolify acepta `POST /api/v1/deploy` devolviendo `deployment_uuid`. Sin embargo, el runner dependía de supuestos no garantizados por las respuestas reales de Coolify v4 Cloud: versión ausente en `GET /servers/{uuid}`, FQDN con esquema, `appVariant` ausente, nombre de service divergente, registry namespaced no compartido por push, SHA remoto no propagado y fuente de secretos explícita ignorada.
+
+**Impacto:** se generó un duplicado de Garage (`irj8vss6xmckyh5ofrddmlma`), se produjeron varios bloqueos falsos o tardíos y el deploy con SHA correcto terminó `failed` sin causa visible en el endpoint de deployment. Playwright V3 encontró rutas 404 aunque la aplicación y `/api/health` permanecen saludables.
+
+**Determinación técnica provisional:** no conviene continuar con parches sobre supuestos. El runner debe rebasarse sobre un contrato observado y verificable: primero smoke read-only con respuestas reales redacted, después adapters por endpoint/shape real, luego ensure idempotente y finalmente deploy independiente. La documentación oficial sigue siendo la fuente de rutas y verbos, pero no sustituye el contrato de respuesta observado de esta instancia Cloud.
+
+**Pregunta/decisión pendiente de Frank:** confirmar si el siguiente incremento debe ser un **rebase controlado del runner Coolify sobre contratos reales**, conservando el producto y los UUID existentes, en lugar de continuar el parcheo incremental.
+
+**Prohibido mientras no se resuelva:** borrar el duplicado, recrear recursos, reintentar deploy ciegamente, inventar logs/causas o declarar V3 PASS.
+
+**Resolución confirmada por Frank (2026-08-24):** se abandona el parcheo incremental y se rehace el runner de Coolify en una sesión nueva, con una superficie simple basada en endpoints oficiales y respuestas reales. El primer alcance será inventario/adopción existente + deploy de staging; la creación genérica de recursos y la compatibilidad especulativa quedan fuera hasta existir evidencia real que las justifique.
+
+**SUPERSESSION-20260824-01 (2026-08-24):** Frank precisó el límite operativo: el módulo sólo debe ejecutar las acciones básicas mínimas para crear/provisionar la infraestructura base. Migraciones, bootstrap, seeds, cambios de variables, deploys extraordinarios, consultas operativas y demás acciones de ciclo de vida deben ejecutarse on demand mediante API oficial, igual que el modelo operativo de Vercel/Supabase. Esta precisión supersede el enfoque de “deploy como flujo principal” de `ADR-20260824-02`/`SPEC-20260824-002`; ambos se conservan como histórico y quedan `superseded`.
+
+## DEC-20260824-03 · Separación provisionamiento base vs operaciones on demand
+
+**Tipo:** `DECISION` · **Estado:** `confirmed` · **Propietario:** Frank/ATLAS
+
+- `vectoria-provision` crea únicamente la infraestructura base mínima declarada y necesaria.
+- No debe contener workflows de migración, bootstrap, seed, deploy recurrente, rollback, reparación, consultas ad hoc ni lógica de producto.
+- Esas operaciones se ejecutan mediante llamadas API explícitas y auditables bajo demanda, desde el agente/operador autorizado.
+- Cada operación on demand debe ser idempotente o declarar su efecto, validar el recurso objetivo y devolver evidencia; no se esconde dentro de `ensure`.
+- Coolify se trata como API externa; el runner no replica su lifecycle ni crea una segunda plataforma de operaciones.
+
+---
+
+## FND-20260824-01 · Consumidores del carril legacy identificados
+
+**Tipo:** `FINDING` · **Estado:** `resolved` · **Severidad:** P0 para el cutover
+
+**Inventario dirigido (2026-08-24):** consumidores ejecutables activos: `infrastructure/vectoria-provision/src/index.ts` (modo dual `--manifest/--operation`), `src/runtime-adapter-bridge/{selector,legacy}.ts`, `src/secrets-file.ts`/`src/ensure.ts` (fallback de fuentes legacy), y `src/core/triggers/flags.ts` (`--operation` como flag contractual que debe distinguirse del modo legacy). Consumidores de prueba/fixture: `tests/e2e/cli-package.test.ts`, `tests/trigger-provision.test.ts`, `tests/runtime-adapter/*.test.ts`, `tests/e2e/cross-project-v2.test.ts`, `tests/push/provision-v3-deploy-safeguards.test.ts` y fixtures con `adapter: legacy`. Consumidor canónico: `context/infra/manifests/MANIFEST-STAGING-20260822-01-sistema-vectoria.v2.json`.
+
+No se encontró otro manifest canónico activo, launcher o script operativo que invoque la forma legacy. Tras el cutover, el grep dirigido y QA-20260824-01 confirmaron cero consumidores ejecutables. Las referencias en ADR/SPEC/IMPL/QA/changelog son históricas o contractuales y no deben borrarse; se conservan justificadas y se marcarán `SUPERSEDED` cuando el nuevo contrato las reemplace.
+
 ## FND-20260823-01 · Contradicción entre gate funcional y contrato de SPEC-002
 
 **Tipo:** `FINDING` · **Estado:** `resolved` · **Severidad:** P1 para SPEC-002

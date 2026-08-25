@@ -13,7 +13,14 @@ test.describe("Plataforma Base · matriz responsive", () => {
     await page.getByLabel(/Contraseña/i).fill("ContraseñaInvalida1!");
     await page.getByRole("button", { name: /Iniciar sesión/i }).click();
     // Con credenciales inválidas el flujo prueba error visible; seed real cubre login correcto.
-    await expect(page.getByRole("alert")).toBeVisible();
+    // Usamos el `<p role="alert">` del formulario de login
+    // (`src/modules/plataforma/login/login-form.tsx`): el locator
+    // `getByRole("alert")` global también matchea el route-announcer
+    // inyectado por Next.js (`#__next-route-announcer__`), lo que
+    // produce un strict-mode violation en tablet/desktop.
+    await expect(
+      page.locator('form p[role="alert"]', { hasText: /No fue posible iniciar sesión/i }),
+    ).toBeVisible();
   });
 
   test("listado y detalle conservan tabla responsive", async ({ page }) => {

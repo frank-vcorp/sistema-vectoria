@@ -19,9 +19,12 @@ const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 );
 CardHeader.displayName = "CardHeader";
 
-const CardTitle = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+const CardTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HTMLHeadingElement>>(
   ({ className, ...props }, ref) => (
-    <div
+    // CardTitle es un wrapper genérico: el contenido accesible lo aporta
+    // el consumidor mediante `children`, no el propio componente.
+    // eslint-disable-next-line jsx-a11y/heading-has-content
+    <h3
       ref={ref}
       className={cn("text-2xl font-semibold leading-none tracking-tight", className)}
       {...props}

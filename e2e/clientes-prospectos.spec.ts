@@ -32,10 +32,17 @@ test.describe("SPEC-002 · Clientes y Prospectos · matriz responsive", () => {
     ).toBeVisible();
   });
 
-  test("navegación principal expone los nuevos módulos", async ({ page, isMobile }) => {
+  test("navegación principal expone los nuevos módulos", async ({ page }) => {
     await page.goto("/");
-    if (isMobile) {
-      await page.getByLabel(/Abrir navegación/i).click();
+    // La navegación se renderiza como drawer (botón "Abrir navegación"
+    // visible) cuando el viewport está por debajo del breakpoint `lg`
+    // de Tailwind (1024 px): mobile-375 y tablet-768. En desktop-1280
+    // la navegación es inline y el botón no existe. Detectamos por
+    // presencia real del botón en lugar de por `isMobile` (que sólo
+    // es true para el proyecto mobile-375 de Playwright).
+    const navToggle = page.getByLabel(/Abrir navegación/i);
+    if (await navToggle.isVisible()) {
+      await navToggle.click();
       await expect(page.getByRole("dialog", { name: /Navegación/i })).toBeVisible();
     }
     await expect(page.getByRole("link", { name: /Prospectos/i })).toBeVisible();

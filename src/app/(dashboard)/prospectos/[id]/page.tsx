@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import Link from "next/link";
 import { messages } from "@/shared/utils";
 import { trpc } from "@/lib/trpc";
@@ -11,13 +10,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
  * Detalle de prospecto. Carga por id; si la visibilidad (AC-6) no
  * permite verlo, el servicio responde `PROSPECT_NOT_FOUND` y mostramos
  * mensaje neutro (no exponer existencia cross-rol).
+ *
+ * IMPORTANTE: Next.js 14.2 entrega `params` como objeto plano (no
+ * Promise) y React 18.3 no expone `React.use`. Tratarlo como objeto
+ * evita la excepción cliente que mostraba el overlay "Application
+ * error" en staging (defecto simétrico al de clientes/[id]/page.tsx,
+ * corregido en el mismo incremento).
  */
 export default function ProspectoDetallePage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }) {
-  const { id } = React.use(params);
+  const { id } = params;
   const query = trpc.clientes.prospectos.byId.useQuery({ prospectId: id });
 
   if (query.isLoading) {

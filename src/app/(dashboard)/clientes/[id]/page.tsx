@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import Link from "next/link";
 import { messages } from "@/shared/utils";
 import { trpc } from "@/lib/trpc";
@@ -12,13 +11,18 @@ import { FiscalPanel } from "@/modules/clientes/clientes/fiscal-panel";
 /**
  * Detalle de cliente (SPEC-002). Carga ficha + panel de contactos y
  * panel de datos fiscales. Los datos fiscales son opcionales (BR-N218).
+ *
+ * IMPORTANTE: Next.js 14.2 entrega `params` como objeto plano (no
+ * Promise) y React 18.3 no expone `React.use`. Tratarlo como objeto
+ * evita la excepción cliente que mostraba el overlay "Application
+ * error" en staging.
  */
 export default function ClienteDetallePage({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: { id: string };
 }) {
-  const { id } = React.use(params);
+  const { id } = params;
   const query = trpc.clientes.clientes.byId.useQuery({ clientId: id });
 
   if (query.isLoading) {
