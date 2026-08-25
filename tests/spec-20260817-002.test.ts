@@ -509,6 +509,32 @@ function readQuotesService(): string {
   return _readFileSync(QUOTES_SERVICE_PATH, "utf8");
 }
 
+const COTIZACION_DETAIL_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "modules",
+  "comercial",
+  "cotizaciones",
+  "cotizacion-detail.tsx",
+);
+function readCotizacionDetail(): string {
+  return _readFileSync(COTIZACION_DETAIL_PATH, "utf8");
+}
+
+const ACCEPT_COTIZACION_DIALOG_PATH = _resolve(
+  __spec_dirname,
+  "..",
+  "src",
+  "modules",
+  "comercial",
+  "cotizaciones",
+  "accept-cotizacion-dialog.tsx",
+);
+function readAcceptCotizacionDialog(): string {
+  return _readFileSync(ACCEPT_COTIZACION_DIALOG_PATH, "utf8");
+}
+
 async function readMessages(): Promise<unknown> {
   // Import estático a través del loader TS de Vitest; permite verificar
   // el catálogo de mensajes sin transpilación manual.
@@ -1143,5 +1169,286 @@ describe("IMPL-20260825-24 · FIX IMPLEMENTATION_DEFECT · quotes.ts · loadQuot
         src,
       ),
     ).toBe(true);
+  });
+});
+
+/**
+ * IMPL-20260825-25 · SPEC-003 B7 — transiciones draft → sent y
+ * aceptación con evidencia (BR-N237/N02/N25, H-08, DEC-FUN-55).
+ *
+ * Cubre:
+ *  - messages.cotizaciones (send / accept / statusLabel / pendingOs).
+ *  - CotizacionDetail expone `Enviar cotización` sólo en `draft`,
+ *    `Registrar aceptación` sólo en `sent | negotiation`, y muestra
+ *    los datos de aceptación + aviso de OS pendiente/delegada en
+ *    `accepted`. En estados incompatibles (`internal_review`,
+ *    `rejected`, `expired`, `cancelled`) NO renderiza mutaciones.
+ *  - CotizacionDetail invoca `cotizaciones.send` con `{ quoteId }`
+ *    y mapea errores de dominio (`FORBIDDEN`,
+ *    `QUOTE_ALREADY_ACCEPTED`) a mensajes canónicos con role=alert.
+ *  - AcceptCotizacionDialog:
+ *     · no genera UUID dummy;
+ *     · exige `evidenceFileId` UUID válido antes de mutar;
+ *     · exige `accepterName` ≥1 antes de mutar;
+ *     · exige `medium` ∈ {email, telefono, presencial, otro};
+ *     · invoca `cotizaciones.accept` con valores reales;
+ *     · muestra aviso explícito de OS pendiente/delegada a SPEC-004;
+ *     · nunca afirma éxito si el backend no devuelve
+ *       `status='accepted'`;
+ *     · sin `window.prompt` ni acceso directo a BD.
+ */
+describe("IMPL-20260825-25 · messages cotizaciones · send/accept/pendingOs", () => {
+  it("messages.cotizaciones expone los textos canónicos de send/accept/pendingOs", async () => {
+    const msgs = (await readMessages()) as {
+      cotizaciones: Record<string, unknown>;
+    };
+    const c = msgs.cotizaciones;
+    // Acciones send.
+    expect(c.send).toBeTypeOf("string");
+    expect(c.sendSubmitting).toBeTypeOf("string");
+    expect(c.sendError).toBeTypeOf("string");
+    expect(c.sendForbidden).toBeTypeOf("string");
+    expect(c.sendImmutable).toBeTypeOf("string");
+    // Acciones accept.
+    expect(c.accept).toBeTypeOf("string");
+    expect(c.acceptForbidden).toBeTypeOf("string");
+    expect(c.acceptImmutable).toBeTypeOf("string");
+    // Diálogo de aceptación.
+    expect(c.acceptTitle).toBeTypeOf("string");
+    expect(c.acceptSubtitle).toBeTypeOf("string");
+    expect(c.acceptNameLabel).toBeTypeOf("string");
+    expect(c.acceptNamePlaceholder).toBeTypeOf("string");
+    expect(c.acceptNameRequired).toBeTypeOf("string");
+    expect(c.acceptOrgLabel).toBeTypeOf("string");
+    expect(c.acceptOrgPlaceholder).toBeTypeOf("string");
+    expect(c.acceptMediumLabel).toBeTypeOf("string");
+    expect(c.acceptMediumHelp).toBeTypeOf("string");
+    expect(c.acceptMediumPlaceholder).toBeTypeOf("string");
+    expect(c.acceptEvidenceLabel).toBeTypeOf("string");
+    expect(c.acceptEvidencePlaceholder).toBeTypeOf("string");
+    expect(c.acceptEvidenceHelp).toBeTypeOf("string");
+    expect(c.acceptEvidenceRequired).toBeTypeOf("string");
+    expect(c.acceptEvidenceInvalidUuid).toBeTypeOf("string");
+    expect(c.acceptProxyLabel).toBeTypeOf("string");
+    expect(c.acceptProxyHelp).toBeTypeOf("string");
+    expect(c.acceptNotesLabel).toBeTypeOf("string");
+    expect(c.acceptNotesPlaceholder).toBeTypeOf("string");
+    expect(c.acceptSubmit).toBeTypeOf("string");
+    expect(c.acceptSubmitting).toBeTypeOf("string");
+    expect(c.acceptCancel).toBeTypeOf("string");
+    expect(c.acceptError).toBeTypeOf("string");
+    expect(c.acceptSuccessTitle).toBeTypeOf("string");
+    expect(c.acceptSuccessBody).toBeTypeOf("string");
+    expect(c.acceptPendingOsTitle).toBeTypeOf("string");
+    expect(c.acceptPendingOsBody).toBeTypeOf("string");
+    // Etiquetas canónicas y notas.
+    expect(c.acceptedAtLabel).toBeTypeOf("string");
+    expect(c.acceptedByProxyLabel).toBeTypeOf("string");
+    expect(c.acceptedEvidenceLabel).toBeTypeOf("string");
+    expect(c.statusCanonicalNote).toBeTypeOf("string");
+  });
+
+  it("messages.cotizaciones.statusLabel incluye exactamente los 8 estados canónicos", async () => {
+    const msgs = (await readMessages()) as {
+      cotizaciones: { statusLabel: Record<string, string> };
+    };
+    const m = msgs.cotizaciones.statusLabel;
+    expect(m.draft).toBeTypeOf("string");
+    expect(m.internal_review).toBeTypeOf("string");
+    expect(m.sent).toBeTypeOf("string");
+    expect(m.negotiation).toBeTypeOf("string");
+    expect(m.accepted).toBeTypeOf("string");
+    expect(m.rejected).toBeTypeOf("string");
+    expect(m.expired).toBeTypeOf("string");
+    expect(m.cancelled).toBeTypeOf("string");
+  });
+});
+
+describe("IMPL-20260825-25 · CotizacionDetail · botón Enviar sólo en draft", () => {
+  it("sólo renderiza el botón Enviar cotización cuando status === 'draft'", () => {
+    const src = readCotizacionDetail();
+    // El flag de UI está atado a `q.status === 'draft'`.
+    expect(/canSend\s*=\s*q\.status\s*===\s*["']draft["']/.test(src)).toBe(true);
+    // El botón expone el data-testid canónico.
+    expect(/cotizacion-detail-send/.test(src)).toBe(true);
+    // Enviar usa el mensaje canónico.
+    expect(/messages\.cotizaciones\.send\b/.test(src)).toBe(true);
+    // Anti-patrones: nunca UUIDs dummy, ni BD directa, ni prompt.
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+  });
+
+  it("invoca cotizaciones.send con `{ quoteId }` y nunca send en estados no-draft", () => {
+    const src = readCotizacionDetail();
+    // send.useMutation está cableada.
+    expect(/cotizaciones\.send\.useMutation/.test(src)).toBe(true);
+    // El mutate envía sólo `{ quoteId: id }` (la UI NO envía payloads
+    // sintéticos como tipoCobro/notes/etc).
+    expect(
+      /sendMutation\.mutate\(\s*\{\s*quoteId:\s*id\s*\}\s*\)/.test(src),
+    ).toBe(true);
+    // La mutación send se invoca dentro de un guard `canSend` que
+    // depende exclusivamente de `q.status === 'draft'`.
+    expect(/if\s*\(\s*!canSend\s*\)\s*return;/.test(src)).toBe(true);
+    // En errores mapea códigos canónicos.
+    expect(/["']FORBIDDEN["']/.test(src)).toBe(true);
+    expect(/sendForbidden/.test(src)).toBe(true);
+    expect(/QUOTE_ALREADY_ACCEPTED/.test(src)).toBe(true);
+    expect(/sendImmutable/.test(src)).toBe(true);
+    expect(/cotizacion-detail-send-error/.test(src)).toBe(true);
+    expect(/role="alert"/.test(src)).toBe(true);
+  });
+
+  it("NO renderiza Enviar ni Aceptar en estados incompatibles (rejected/expired/cancelled/internal_review)", () => {
+    const src = readCotizacionDetail();
+    // canSend y canAccept están atados a condiciones explícitas
+    // (no se renderiza el bloque de acciones si ninguna se cumple).
+    expect(/canSend\s*=\s*q\.status\s*===\s*["']draft["']/.test(src)).toBe(true);
+    expect(
+      /canAccept\s*=\s*q\.status\s*===\s*["']sent["']\s*\|\|\s*q\.status\s*===\s*["']negotiation["']/.test(
+        src,
+      ),
+    ).toBe(true);
+    // El bloque de acciones sólo se monta si alguna acción es
+    // posible o el estado es `accepted` (lectura de datos).
+    expect(
+      /canSend\s*\|\|\s*canAccept\s*\|\|\s*q\.status\s*===\s*["']accepted["']/.test(
+        src,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("IMPL-20260825-25 · CotizacionDetail · botón Aceptar en sent | negotiation y datos accepted", () => {
+  it("renderiza el botón Registrar aceptación sólo en sent | negotiation", () => {
+    const src = readCotizacionDetail();
+    // El botón Aceptar vive dentro del flag canAccept.
+    expect(/cotizacion-detail-open-accept/.test(src)).toBe(true);
+    // El diálogo se monta sólo en sent | negotiation (no en draft ni
+    // en accepted ni en estados terminales).
+    expect(
+      /canAccept\s*\?\s*\([\s\S]*?AcceptCotizacionDialog/.test(src),
+    ).toBe(true);
+    // Mensaje canónico.
+    expect(/messages\.cotizaciones\.accept\b/.test(src)).toBe(true);
+  });
+
+  it("en accepted muestra acceptedAt / acceptedByProxy / acceptedEvidenceFileId + aviso OS pendiente", () => {
+    const src = readCotizacionDetail();
+    // El bloque accepted expone los datos canónicos.
+    expect(/cotizacion-detail-accepted/.test(src)).toBe(true);
+    expect(/q\.acceptedAt/.test(src)).toBe(true);
+    expect(/q\.acceptedByProxy/.test(src)).toBe(true);
+    expect(/q\.acceptedEvidenceFileId/.test(src)).toBe(true);
+    // Etiquetas canónicas.
+    expect(/acceptedAtLabel/.test(src)).toBe(true);
+    expect(/acceptedByProxyLabel/.test(src)).toBe(true);
+    expect(/acceptedEvidenceLabel/.test(src)).toBe(true);
+    // Aviso explícito de OS pendiente/delegada a SPEC-004 (NO se
+    // oculta que no se crea OS en este corte).
+    expect(/cotizacion-detail-accepted-pending-os/.test(src)).toBe(true);
+    expect(/acceptPendingOsTitle/.test(src)).toBe(true);
+    expect(/acceptPendingOsBody/.test(src)).toBe(true);
+    expect(/SPEC-004/.test(src)).toBe(true);
+    // La card indica inmutabilidad (BR-N02).
+    expect(/statusCanonicalNote/.test(src)).toBe(true);
+  });
+});
+
+describe("IMPL-20260825-25 · AcceptCotizacionDialog · contrato UI", () => {
+  it("no genera UUID dummy: el evidenceFileId es siempre captura del usuario", () => {
+    const src = readAcceptCotizacionDialog();
+    // Anti-patrón: NUNCA un UUID predefinido en código.
+    expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
+    // El placeholder visual es ilustrativo (todo-zeros) y se distingue
+    // explícitamente del valor real (`trimmedEvidence` exige match
+    // contra `UUID_RE` antes de mutar).
+    expect(/UUID_RE\.test\(trimmedEvidence\)/.test(src)).toBe(true);
+    // El campo se inicializa vacío.
+    expect(/useState\(\s*["']["']\s*\)/.test(src)).toBe(true);
+  });
+
+  it("exige accepterName, evidenceFileId (UUID) y medium antes de mutar", () => {
+    const src = readAcceptCotizacionDialog();
+    // Valida nombre obligatorio antes de la mutación.
+    expect(/trimmedName\.length\s*<\s*1/.test(src)).toBe(true);
+    expect(/acceptNameRequired/.test(src)).toBe(true);
+    // Valida UUID obligatorio antes de la mutación.
+    expect(/trimmedEvidence\.length\s*===\s*0/.test(src)).toBe(true);
+    expect(/UUID_RE\.test\(trimmedEvidence\)/.test(src)).toBe(true);
+    expect(/acceptEvidenceRequired/.test(src)).toBe(true);
+    expect(/acceptEvidenceInvalidUuid/.test(src)).toBe(true);
+    // Valida medium ∈ ACCEPTANCE_MEDIUMS antes de mutar.
+    expect(/ACCEPTANCE_MEDIUMS\.includes/.test(src)).toBe(true);
+    // canSubmit refleja los 3 gates.
+    expect(/canSubmit\s*=/.test(src)).toBe(true);
+    expect(/evidenceIsUuid/.test(src)).toBe(true);
+    // Mensajes de error con role=alert.
+    expect(/role="alert"/.test(src)).toBe(true);
+    expect(/accept-cotizacion-validation-error/.test(src)).toBe(true);
+    expect(/accept-cotizacion-submit-error/.test(src)).toBe(true);
+  });
+
+  it("invoca cotizaciones.accept con valores reales y nunca afirma éxito sin status='accepted'", () => {
+    const src = readAcceptCotizacionDialog();
+    // Mutación cableada.
+    expect(/cotizaciones\.accept\.useMutation/.test(src)).toBe(true);
+    // El payload incluye sólo campos del contrato canónico.
+    expect(/accept\.mutate\(\s*\{[\s\S]*?quoteId,/.test(src)).toBe(true);
+    expect(/accepterName:\s*trimmedName/.test(src)).toBe(true);
+    expect(/medium:\s*medium\s+as\s+AcceptanceMedium/.test(src)).toBe(true);
+    expect(/evidenceFileId:\s*trimmedEvidence/.test(src)).toBe(true);
+    expect(/proxy,/.test(src)).toBe(true);
+    // Si el backend no devuelve status='accepted', NO se afirma éxito.
+    expect(/status\s*!==\s*["']accepted["']/.test(src)).toBe(true);
+    expect(/setSubmitError\(messages\.cotizaciones\.acceptError\)/.test(src)).toBe(
+      true,
+    );
+    // Mapea códigos de dominio a mensajes canónicos.
+    expect(/["']FORBIDDEN["']/.test(src)).toBe(true);
+    expect(/acceptForbidden/.test(src)).toBe(true);
+    expect(/QUOTE_ALREADY_ACCEPTED/.test(src)).toBe(true);
+    expect(/acceptImmutable/.test(src)).toBe(true);
+    expect(/EVIDENCE_FILE_NOT_FOUND/.test(src)).toBe(true);
+  });
+
+  it("expone aviso explícito de OS pendiente/delegada a SPEC-004", () => {
+    const src = readAcceptCotizacionDialog();
+    expect(/accept-cotizacion-pending-os/.test(src)).toBe(true);
+    expect(/acceptPendingOsTitle/.test(src)).toBe(true);
+    expect(/acceptPendingOsBody/.test(src)).toBe(true);
+    // El aviso indica explícitamente que NO se crea OS en este
+    // corte (delegado a SPEC-004).
+    expect(/SPEC-004/.test(src)).toBe(true);
+    expect(/delegad/.test(src)).toBe(true);
+  });
+
+  it("accesibilidad: htmlFor + aria-describedby + data-testid estables y sin window.prompt / BD directa", () => {
+    const src = readAcceptCotizacionDialog();
+    // Etiquetas.
+    expect(/htmlFor="accept-cotizacion-name"/.test(src)).toBe(true);
+    expect(/htmlFor="accept-cotizacion-org"/.test(src)).toBe(true);
+    expect(/htmlFor="accept-cotizacion-medium"/.test(src)).toBe(true);
+    expect(/htmlFor="accept-cotizacion-evidence"/.test(src)).toBe(true);
+    expect(/htmlFor="accept-cotizacion-notes"/.test(src)).toBe(true);
+    expect(/htmlFor="accept-cotizacion-proxy"/.test(src)).toBe(true);
+    // aria-describedby por campo.
+    expect(/aria-describedby="accept-cotizacion-name-help"/.test(src)).toBe(true);
+    expect(/aria-describedby="accept-cotizacion-medium-help"/.test(src)).toBe(true);
+    expect(/aria-describedby="accept-cotizacion-evidence-help"/.test(src)).toBe(
+      true,
+    );
+    expect(/aria-describedby="accept-cotizacion-proxy-help"/.test(src)).toBe(
+      true,
+    );
+    // data-testid estables.
+    expect(/data-testid="accept-cotizacion-name"/.test(src)).toBe(true);
+    expect(/data-testid="accept-cotizacion-medium"/.test(src)).toBe(true);
+    expect(/data-testid="accept-cotizacion-evidence"/.test(src)).toBe(true);
+    expect(/data-testid="accept-cotizacion-submit"/.test(src)).toBe(true);
+    // Anti-patrones.
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
   });
 });

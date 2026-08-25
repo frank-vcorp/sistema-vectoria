@@ -439,6 +439,74 @@ export const messages = {
     createOpenLink: "Abrir detalle de la cotización",
     createScopeIdMissing:
       "No se cuenta con el id real del alcance firmado.",
+    // IMPL-20260825-25 · Transiciones draft → sent y aceptación con
+    // evidencia (BR-N237/N25). Catálogo de mensajes canónicos para
+    // `cotizacion-detail.tsx` y `accept-cotizacion-dialog.tsx`.
+    send: "Enviar cotización",
+    sendSubmitting: "Enviando…",
+    sendError: "No fue posible enviar la cotización.",
+    sendForbidden:
+      "No tienes permisos para enviar la cotización (gestionar_comercial).",
+    sendImmutable:
+      "La cotización ya no está en draft; sólo se puede enviar una cotización en borrador.",
+    accept: "Registrar aceptación",
+    acceptForbidden:
+      "No tienes permisos para aceptar la cotización (aceptar_cotizacion).",
+    acceptImmutable:
+      "La cotización ya está aceptada o en un estado incompatible; no se puede registrar otra aceptación.",
+    // Diálogo de aceptación.
+    acceptTitle: "Registrar aceptación con evidencia",
+    acceptSubtitle:
+      "Captura la identidad del aceptante, el medio y el UUID del archivo de evidencia que ya existe en tu organización. La aceptación genera la OS (delegada a SPEC-004).",
+    acceptNameLabel: "Nombre del aceptante",
+    acceptNamePlaceholder: "Persona que acepta",
+    acceptNameRequired: "El nombre del aceptante es obligatorio.",
+    acceptOrgLabel: "Organización del aceptante (opcional)",
+    acceptOrgPlaceholder: "Razón social / área",
+    acceptMediumLabel: "Medio de aceptación",
+    acceptMediumHelp:
+      "email · telefono · presencial · otro (BR-N237).",
+    acceptMediumPlaceholder: "Selecciona el medio",
+    acceptEvidenceLabel: "UUID del archivo de evidencia",
+    acceptEvidencePlaceholder: "00000000-0000-0000-0000-000000000000",
+    acceptEvidenceHelp:
+      "El archivo debe existir y pertenecer a tu organización. Si se proporciona un UUID inválido, el backend rechazará la operación con error visible.",
+    acceptEvidenceRequired:
+      "El UUID del archivo de evidencia es obligatorio.",
+    acceptEvidenceInvalidUuid:
+      "El identificador del archivo de evidencia debe ser un UUID válido.",
+    acceptProxyLabel: "Vendedor registra en nombre del cliente (proxy)",
+    acceptProxyHelp:
+      "DEC-FUN-55 / H-08: por defecto el Vendedor captura la aceptación en nombre del cliente.",
+    acceptNotesLabel: "Notas (opcional)",
+    acceptNotesPlaceholder: "Notas de la aceptación",
+    acceptSubmit: "Registrar aceptación",
+    acceptSubmitting: "Registrando…",
+    acceptCancel: "Cancelar",
+    acceptError: "No fue posible registrar la aceptación.",
+    acceptSuccessTitle: "Aceptación registrada",
+    acceptSuccessBody:
+      "La cotización {code} pasó a estado accepted (BR-N237).",
+    acceptPendingOsTitle: "OS pendiente (delegada)",
+    acceptPendingOsBody:
+      "Esta UI no crea la Orden de Servicio todavía. La auditoría os.create_pending_from_quote queda delegada a SPEC-004, que la materializará desde el flujo OS. La cotización es inmutable.",
+    // Etiquetas canónicas de estado (UI).
+    statusLabel: {
+      draft: "Borrador",
+      internal_review: "Revisión interna",
+      sent: "Enviada",
+      negotiation: "Negociación",
+      accepted: "Aceptada",
+      rejected: "Rechazada",
+      expired: "Vencida",
+      cancelled: "Cancelada",
+    },
+    acceptedAtLabel: "Aceptada el",
+    acceptedByProxyLabel: "Aceptada por (proxy)",
+    acceptedEvidenceLabel: "Evidencia (UUID)",
+    acceptedByUserLabel: "Aceptada por usuario",
+    statusCanonicalNote:
+      "Estado canónico: sólo lectura en este punto (BR-N02).",
   },
   errors: {
     networkError: "Error de red. Verifica tu conexión.",
