@@ -467,14 +467,25 @@ export const messages = {
     acceptMediumHelp:
       "email · telefono · presencial · otro (BR-N237).",
     acceptMediumPlaceholder: "Selecciona el medio",
-    acceptEvidenceLabel: "UUID del archivo de evidencia",
-    acceptEvidencePlaceholder: "00000000-0000-0000-0000-000000000000",
+    // IMPL-20260825-26 · SPEC-026/ADR-04: la evidencia ahora viaja
+    // por upload real (`POST /api/files/upload` reusando
+    // `FilesService`); se conserva el nombre del campo para no
+    // romper consumidores, pero el placeholder/required/help
+    // describen un archivo local (no un UUID manual).
+    acceptEvidenceLabel: "Archivo de evidencia",
+    acceptEvidencePlaceholder: "Selecciona PDF, XML, PNG o JPEG (≤ 10MB)",
     acceptEvidenceHelp:
-      "El archivo debe existir y pertenecer a tu organización. Si se proporciona un UUID inválido, el backend rechazará la operación con error visible.",
+      "Sube el archivo de evidencia (PDF, XML, PNG o JPEG, máx. 10MB). El servidor validará el tipo, el tamaño y la pertenencia a tu organización antes de registrar la aceptación.",
     acceptEvidenceRequired:
-      "El UUID del archivo de evidencia es obligatorio.",
+      "El archivo de evidencia es obligatorio.",
     acceptEvidenceInvalidUuid:
       "El identificador del archivo de evidencia debe ser un UUID válido.",
+    acceptEvidenceUploading: "Subiendo evidencia…",
+    acceptEvidenceUploadError:
+      "No fue posible subir el archivo de evidencia. Verifica tipo (PDF/XML/PNG/JPEG) y tamaño (≤ 10MB) y vuelve a intentar.",
+    acceptEvidenceUploadRequired: "Selecciona un archivo de evidencia antes de continuar.",
+    acceptEvidenceAcceptedTypesLabel:
+      "Tipos permitidos: PDF, XML, PNG, JPEG (máx. 10MB).",
     acceptProxyLabel: "Vendedor registra en nombre del cliente (proxy)",
     acceptProxyHelp:
       "DEC-FUN-55 / H-08: por defecto el Vendedor captura la aceptación en nombre del cliente.",

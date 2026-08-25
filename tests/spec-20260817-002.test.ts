@@ -1356,49 +1356,80 @@ describe("IMPL-20260825-25 · CotizacionDetail · botón Aceptar en sent | negot
   });
 });
 
-describe("IMPL-20260825-25 · AcceptCotizacionDialog · contrato UI", () => {
-  it("no genera UUID dummy: el evidenceFileId es siempre captura del usuario", () => {
+describe("IMPL-20260825-26 · AcceptCotizacionDialog · upload de evidencia antes de aceptar", () => {
+  it("no genera UUID dummy ni window.prompt ni accede a BD directa", () => {
     const src = readAcceptCotizacionDialog();
     // Anti-patrón: NUNCA un UUID predefinido en código.
     expect(src).not.toMatch(/00000000-0000-0000-0000-[0-9a-f]{12}/);
-    // El placeholder visual es ilustrativo (todo-zeros) y se distingue
-    // explícitamente del valor real (`trimmedEvidence` exige match
-    // contra `UUID_RE` antes de mutar).
-    expect(/UUID_RE\.test\(trimmedEvidence\)/.test(src)).toBe(true);
-    // El campo se inicializa vacío.
-    expect(/useState\(\s*["']["']\s*\)/.test(src)).toBe(true);
+    // Anti-patrón: window.prompt está prohibido en la UI (DEC-FUN-23).
+    expect(src).not.toMatch(/window\.prompt\s*\(/);
+    // Anti-patrón: la UI NO accede a la BD directamente (AC-26).
+    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
+    // La evidencia se inicializa vacía (`null`) — NUNCA un valor
+    // por defecto que se envíe al backend.
+    expect(/useState<\s*File\s*\|\s*null\s*>\(\s*null\s*\)/.test(src)).toBe(true);
   });
 
-  it("exige accepterName, evidenceFileId (UUID) y medium antes de mutar", () => {
+  it("selector de archivo acepta sólo PDF/XML/PNG/JPEG y límite 10MB", () => {
     const src = readAcceptCotizacionDialog();
-    // Valida nombre obligatorio antes de la mutación.
+    // Allowlist declarativa en el `<input type="file">`.
+    expect(/type="file"/.test(src)).toBe(true);
+    expect(
+      /accept=\{\s*ACCEPTED_FILE_ACCEPT_ATTR\s*\}/.test(src),
+    ).toBe(true);
+    // La allowlist canónica incluye los 5 MIME types válidos.
+    expect(/application\/pdf/.test(src)).toBe(true);
+    expect(/application\/xml/.test(src)).toBe(true);
+    expect(/text\/xml/.test(src)).toBe(true);
+    expect(/image\/png/.test(src)).toBe(true);
+    expect(/image\/jpeg/.test(src)).toBe(true);
+    // El tamaño máximo declarado en el cliente es 10MB (mismo
+    // límite que `FilesService` y la ruta).
+    expect(/MAX_BYTES\s*=\s*10\s*\*\s*1024\s*\*\s*1024/.test(src)).toBe(true);
+  });
+
+  it("exige nombre, medio y archivo válido antes de habilitar el submit", () => {
+    const src = readAcceptCotizacionDialog();
+    // Valida nombre obligatorio.
     expect(/trimmedName\.length\s*<\s*1/.test(src)).toBe(true);
     expect(/acceptNameRequired/.test(src)).toBe(true);
-    // Valida UUID obligatorio antes de la mutación.
-    expect(/trimmedEvidence\.length\s*===\s*0/.test(src)).toBe(true);
-    expect(/UUID_RE\.test\(trimmedEvidence\)/.test(src)).toBe(true);
-    expect(/acceptEvidenceRequired/.test(src)).toBe(true);
-    expect(/acceptEvidenceInvalidUuid/.test(src)).toBe(true);
-    // Valida medium ∈ ACCEPTANCE_MEDIUMS antes de mutar.
+    // Valida medium ∈ ACCEPTANCE_MEDIUMS.
     expect(/ACCEPTANCE_MEDIUMS\.includes/.test(src)).toBe(true);
-    // canSubmit refleja los 3 gates.
+    // Valida archivo seleccionado + tamaño + MIME antes de mutar.
+    expect(/!evidenceFile/.test(src)).toBe(true);
+    expect(/evidenceFile\.size\s*>\s*MAX_BYTES/.test(src)).toBe(true);
+    expect(/ACCEPTED_MIME_TYPES/.test(src)).toBe(true);
+    expect(/fileLooksValid/.test(src)).toBe(true);
+    // canSubmit refleja los 3 gates + estado de carga.
     expect(/canSubmit\s*=/.test(src)).toBe(true);
-    expect(/evidenceIsUuid/.test(src)).toBe(true);
+    expect(/!isUploading/.test(src)).toBe(true);
     // Mensajes de error con role=alert.
     expect(/role="alert"/.test(src)).toBe(true);
     expect(/accept-cotizacion-validation-error/.test(src)).toBe(true);
+    expect(/accept-cotizacion-upload-error/.test(src)).toBe(true);
     expect(/accept-cotizacion-submit-error/.test(src)).toBe(true);
   });
 
-  it("invoca cotizaciones.accept con valores reales y nunca afirma éxito sin status='accepted'", () => {
+  it("sube el archivo ANTES de invocar cotizaciones.accept y nunca afirma éxito sin upload 201", () => {
     const src = readAcceptCotizacionDialog();
     // Mutación cableada.
     expect(/cotizaciones\.accept\.useMutation/.test(src)).toBe(true);
-    // El payload incluye sólo campos del contrato canónico.
+    // Endpoint del nuevo route handler (sin tRPC binary, mismo dominio).
+    expect(/fetch\(\s*["']\/api\/files\/upload["']/.test(src)).toBe(true);
+    expect(/method:\s*["']POST["']/.test(src)).toBe(true);
+    expect(/new\s+FormData\(\)/.test(src)).toBe(true);
+    // El payload del fetch es multipart y contiene `file`.
+    expect(/fd\.append\(\s*["']file["']/.test(src)).toBe(true);
+    // Sólo 201 con la forma canónica se considera éxito de subida.
+    expect(/res\.status\s*!==\s*201/.test(src)).toBe(true);
+    expect(/typeof\s+body\.fileId\s*!==\s*["']string["']/.test(src)).toBe(true);
+    // El `fileId` REAL del backend es el que alimenta la mutación
+    // (NUNCA un UUID dummy, NUNCA `trimmedEvidence` ni un placeholder).
+    expect(/evidenceFileId:\s*fileId/.test(src)).toBe(true);
+    // `accept.mutate` con el resto del contrato.
     expect(/accept\.mutate\(\s*\{[\s\S]*?quoteId,/.test(src)).toBe(true);
     expect(/accepterName:\s*trimmedName/.test(src)).toBe(true);
     expect(/medium:\s*medium\s+as\s+AcceptanceMedium/.test(src)).toBe(true);
-    expect(/evidenceFileId:\s*trimmedEvidence/.test(src)).toBe(true);
     expect(/proxy,/.test(src)).toBe(true);
     // Si el backend no devuelve status='accepted', NO se afirma éxito.
     expect(/status\s*!==\s*["']accepted["']/.test(src)).toBe(true);
@@ -1411,29 +1442,37 @@ describe("IMPL-20260825-25 · AcceptCotizacionDialog · contrato UI", () => {
     expect(/QUOTE_ALREADY_ACCEPTED/.test(src)).toBe(true);
     expect(/acceptImmutable/.test(src)).toBe(true);
     expect(/EVIDENCE_FILE_NOT_FOUND/.test(src)).toBe(true);
+    // Si la subida falla, NO se llama a `accept.mutate`.
+    // La guarda `return` debe estar dentro del bloque try/catch.
+    expect(/setUploadError[\s\S]{0,200}return\s*;/.test(src)).toBe(true);
   });
 
-  it("expone aviso explícito de OS pendiente/delegada a SPEC-004", () => {
+  it("expone progreso y aviso explícito de OS pendiente/delegada a SPEC-004", () => {
     const src = readAcceptCotizacionDialog();
+    // Indicador de progreso mientras se sube.
+    expect(/accept-cotizacion-uploading/.test(src)).toBe(true);
+    expect(/acceptEvidenceUploading/.test(src)).toBe(true);
+    expect(/isUploading/.test(src)).toBe(true);
+    // Aviso de OS pendiente/delegada sigue presente (SPEC-003 B7).
     expect(/accept-cotizacion-pending-os/.test(src)).toBe(true);
     expect(/acceptPendingOsTitle/.test(src)).toBe(true);
     expect(/acceptPendingOsBody/.test(src)).toBe(true);
-    // El aviso indica explícitamente que NO se crea OS en este
-    // corte (delegado a SPEC-004).
     expect(/SPEC-004/.test(src)).toBe(true);
     expect(/delegad/.test(src)).toBe(true);
   });
 
-  it("accesibilidad: htmlFor + aria-describedby + data-testid estables y sin window.prompt / BD directa", () => {
+  it("accesibilidad: htmlFor + aria-describedby + data-testid estables", () => {
     const src = readAcceptCotizacionDialog();
-    // Etiquetas.
+    // Etiquetas siguen apuntando a inputs con id estable.
     expect(/htmlFor="accept-cotizacion-name"/.test(src)).toBe(true);
     expect(/htmlFor="accept-cotizacion-org"/.test(src)).toBe(true);
     expect(/htmlFor="accept-cotizacion-medium"/.test(src)).toBe(true);
-    expect(/htmlFor="accept-cotizacion-evidence"/.test(src)).toBe(true);
     expect(/htmlFor="accept-cotizacion-notes"/.test(src)).toBe(true);
     expect(/htmlFor="accept-cotizacion-proxy"/.test(src)).toBe(true);
-    // aria-describedby por campo.
+    // El label de evidencia usa el id del input file (estable).
+    expect(/htmlFor=\{fileInputId\}/.test(src)).toBe(true);
+    expect(/id=\{fileInputId\}/.test(src)).toBe(true);
+    // aria-describedby por campo (incluye evidence).
     expect(/aria-describedby="accept-cotizacion-name-help"/.test(src)).toBe(true);
     expect(/aria-describedby="accept-cotizacion-medium-help"/.test(src)).toBe(true);
     expect(/aria-describedby="accept-cotizacion-evidence-help"/.test(src)).toBe(
@@ -1442,13 +1481,13 @@ describe("IMPL-20260825-25 · AcceptCotizacionDialog · contrato UI", () => {
     expect(/aria-describedby="accept-cotizacion-proxy-help"/.test(src)).toBe(
       true,
     );
-    // data-testid estables.
+    // data-testid estables (incluye `accept-cotizacion-evidence`
+    // para el input file).
     expect(/data-testid="accept-cotizacion-name"/.test(src)).toBe(true);
     expect(/data-testid="accept-cotizacion-medium"/.test(src)).toBe(true);
     expect(/data-testid="accept-cotizacion-evidence"/.test(src)).toBe(true);
+    expect(/data-testid="accept-cotizacion-upload-error"/.test(src)).toBe(true);
+    expect(/data-testid="accept-cotizacion-uploading"/.test(src)).toBe(true);
     expect(/data-testid="accept-cotizacion-submit"/.test(src)).toBe(true);
-    // Anti-patrones.
-    expect(src).not.toMatch(/window\.prompt\s*\(/);
-    expect(src).not.toMatch(/from\s+["']@\/server\/db/);
   });
 });

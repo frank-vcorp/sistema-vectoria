@@ -1,19 +1,26 @@
 "use client";
 
 /**
- * SPEC-003 · IMPL-20260825-25 · Diálogo para registrar la aceptación
- * de una cotización con identidad + medio + evidencia (BR-N237,
- * H-08, DEC-FUN-55).
+ * SPEC-20260825-026 · IMPL-20260825-26 · Diálogo para registrar la
+ * aceptación de una cotización con identidad + medio + archivo de
+ * evidencia REAL subido por el usuario (BR-N237, H-08, DEC-FUN-55,
+ * SPEC-003 B7, ADR-20260825-04).
  *
  *  - Captura: nombre (obligatorio), organización (opcional), medio
- *    (`email | telefono | presencial | otro`), `evidenceFileId`
- *    obligatorio como UUID de un archivo REAL que ya exista en
- *    `files` y pertenezca a la organización.
- *  - NO genera IDs dummy ni inventa archivos: el usuario captura el
- *    UUID; si el backend lo rechaza con `EVIDENCE_FILE_NOT_FOUND` u
- *    otro código de dominio, se muestra el error sin afirmar éxito.
- *  - Invoca `trpc.comercial.cotizaciones.accept` con los valores
- *    reales. Si el backend no devuelve identificadores (id / status),
+ *    (`email | telefono | presencial | otro`), archivo de evidencia
+ *    subido por el usuario.
+ *  - El archivo se sube PRIMERO a `POST /api/files/upload` (reutiliza
+ *    `FilesService` existente; allowlist PDF/XML/PNG/JPEG, ≤ 10MB).
+ *    Sólo si la respuesta es 201 con `{ fileId, mime, size, sha256 }`
+ *    se llama `trpc.comercial.cotizaciones.accept` con el `fileId`
+ *    real. Si la subida falla, NO se llama `accept` y se muestra el
+ *    error con `role="alert"` (nunca éxito falso).
+ *  - NO genera IDs dummy ni inventa archivos. El campo de evidencia
+ *    es un `<input type="file">` con `accept` declarativo; el botón
+ *    de aceptación permanece deshabilitado hasta que hay nombre,
+ *    medio y archivo seleccionado.
+ *  - Invoca `trpc.comercial.cotizaciones.accept` con valores reales.
+ *    Si el backend no devuelve identificadores (id / status),
  *    NO se asume éxito: se expone `messages.cotizaciones.acceptError`.
  *  - Al éxito, muestra `status='accepted'` y los datos de aceptación
  *    (`acceptedAt`, `accepterName`, `accepterOrg`, `acceptedEvidenceFileId`,
@@ -26,7 +33,7 @@
  *
  *  Accesibilidad:
  *   - `<Label htmlFor>` por campo editable.
- *   - Errores de validación/submit con `role="alert"`.
+ *   - Errores de validación/submit/upload con `role="alert"`.
  *   - `data-testid` estables para V3 Playwright.
  */
 import * as React from "react";
@@ -45,13 +52,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-// Regex UUID v1-v5 (lowercase o uppercase). La validación cliente NO
-// sustituye al backend (la fila de `files` se valida en servicio);
-// sólo evita enviar UUIDs con forma inválida para reducir el ruido
-// del backend. NUNCA se usa un UUID dummy local — si el campo está
-// vacío, la mutación no se dispara y se exige el valor real.
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Allowlist canónica — mismo set que `FilesService` (`src/server/services/files/index.ts`).
+// El servidor la revalida: nunca se confía en el cliente, sólo se usa
+// para el `accept` declarativo del `<input type="file">` y para el
+// mensaje de error temprano si el usuario selecciona un tipo fuera.
+const ACCEPTED_MIME_TYPES = [
+  "application/pdf",
+  "application/xml",
+  "text/xml",
+  "image/png",
+  "image/jpeg",
+] as const;
+const ACCEPTED_FILE_ACCEPT_ATTR = ACCEPTED_MIME_TYPES.join(",");
+const MAX_BYTES = 10 * 1024 * 1024;
 
 interface AcceptCotizacionDialogProps {
   /** UUID real de la cotización a aceptar (de `cotizaciones.byId`). */
@@ -78,6 +91,14 @@ interface AcceptCotizacionDialogProps {
     code: string;
     status: string;
   }) => void;
+}
+
+/** Forma mínima de la respuesta 201 de `POST /api/files/upload`. */
+interface UploadResponse {
+  fileId: string;
+  mime: string;
+  size: number;
+  sha256: string;
 }
 
 export function AcceptCotizacionDialog({
@@ -133,13 +154,15 @@ export function AcceptCotizacionDialog({
   const [name, setName] = React.useState("");
   const [org, setOrg] = React.useState("");
   const [medium, setMedium] = React.useState<AcceptanceMedium | "">("");
-  const [evidenceFileId, setEvidenceFileId] = React.useState("");
+  const [evidenceFile, setEvidenceFile] = React.useState<File | null>(null);
   const [notes, setNotes] = React.useState("");
   const [proxy, setProxy] = React.useState(true);
   const [validationError, setValidationError] = React.useState<string | null>(
     null,
   );
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [isUploading, setIsUploading] = React.useState(false);
   const [acceptedQuote, setAcceptedQuote] = React.useState<{
     id: string;
     code: string;
@@ -153,60 +176,148 @@ export function AcceptCotizacionDialog({
       setName("");
       setOrg("");
       setMedium("");
-      setEvidenceFileId("");
+      setEvidenceFile(null);
       setNotes("");
       setProxy(true);
       setValidationError(null);
+      setUploadError(null);
       setSubmitError(null);
+      setIsUploading(false);
       setAcceptedQuote(null);
     }
   }, [open]);
 
   const trimmedName = name.trim();
-  const trimmedEvidence = evidenceFileId.trim();
+  const fileLooksValid =
+    evidenceFile !== null &&
+    evidenceFile.size > 0 &&
+    evidenceFile.size <= MAX_BYTES &&
+    (ACCEPTED_MIME_TYPES as readonly string[]).includes(evidenceFile.type);
 
-  const evidenceIsUuid = trimmedEvidence.length > 0 && UUID_RE.test(trimmedEvidence);
   const canSubmit =
     trimmedName.length >= 1 &&
-    evidenceIsUuid &&
     medium !== "" &&
     ACCEPTANCE_MEDIUMS.includes(medium as AcceptanceMedium) &&
-    !accept.isPending;
+    fileLooksValid &&
+    !accept.isPending &&
+    !isUploading;
 
-  function onSubmit() {
-    setSubmitError(null);
+  function validateBeforeSubmit(): string | null {
     if (trimmedName.length < 1) {
-      setValidationError(messages.cotizaciones.acceptNameRequired);
-      return;
-    }
-    if (trimmedEvidence.length === 0) {
-      setValidationError(messages.cotizaciones.acceptEvidenceRequired);
-      return;
-    }
-    if (!UUID_RE.test(trimmedEvidence)) {
-      setValidationError(messages.cotizaciones.acceptEvidenceInvalidUuid);
-      return;
+      return messages.cotizaciones.acceptNameRequired;
     }
     if (
       medium === "" ||
       !ACCEPTANCE_MEDIUMS.includes(medium as AcceptanceMedium)
     ) {
-      setValidationError(messages.cotizaciones.acceptMediumPlaceholder);
+      return messages.cotizaciones.acceptMediumPlaceholder;
+    }
+    if (!evidenceFile) {
+      return messages.cotizaciones.acceptEvidenceUploadRequired;
+    }
+    if (evidenceFile.size <= 0 || evidenceFile.size > MAX_BYTES) {
+      return messages.cotizaciones.acceptEvidenceUploadError;
+    }
+    if (!(ACCEPTED_MIME_TYPES as readonly string[]).includes(evidenceFile.type)) {
+      return messages.cotizaciones.acceptEvidenceUploadError;
+    }
+    return null;
+  }
+
+  function clearFileInput() {
+    setEvidenceFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  /**
+   * Sube el archivo a `/api/files/upload`. Sólo devuelve `fileId`
+   * si la respuesta es 201 con la forma canónica. Cualquier otro
+   * caso (red, 401/403/413/415/5xx, body inválido) se considera
+   * fallo de subida y NO se llama `accept`.
+   */
+  async function uploadEvidence(file: File): Promise<string> {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    const res = await fetch("/api/files/upload", {
+      method: "POST",
+      body: fd,
+      credentials: "same-origin",
+    });
+    if (res.status !== 201) {
+      // Mensaje canónico: el código y mensaje vienen del backend;
+      // nunca se afirma éxito.
+      let detail: string = messages.cotizaciones.acceptEvidenceUploadError;
+      try {
+        const body = (await res.json()) as { message?: unknown; code?: unknown };
+        if (typeof body?.message === "string" && body.message.length > 0) {
+          detail = body.message;
+        }
+      } catch {
+        // body no era JSON — usamos el mensaje canónico.
+      }
+      throw new Error(detail);
+    }
+    const body = (await res.json()) as Partial<UploadResponse>;
+    if (
+      !body ||
+      typeof body.fileId !== "string" ||
+      typeof body.mime !== "string" ||
+      typeof body.size !== "number" ||
+      typeof body.sha256 !== "string"
+    ) {
+      throw new Error(messages.cotizaciones.acceptEvidenceUploadError);
+    }
+    return body.fileId;
+  }
+
+  async function onSubmit() {
+    setSubmitError(null);
+    setUploadError(null);
+    setValidationError(null);
+
+    const validation = validateBeforeSubmit();
+    if (validation !== null) {
+      setValidationError(validation);
       return;
     }
-    setValidationError(null);
+    if (!evidenceFile) {
+      // Guard de tipos: ya validado arriba, pero conservamos la
+      // guarda explícita por seguridad.
+      setValidationError(messages.cotizaciones.acceptEvidenceUploadRequired);
+      return;
+    }
+
+    // 1) Subir el archivo PRIMERO. Si falla, NO se llama `accept`.
+    let fileId: string;
+    try {
+      setIsUploading(true);
+      fileId = await uploadEvidence(evidenceFile);
+    } catch (e) {
+      setIsUploading(false);
+      const detail = e instanceof Error ? e.message : null;
+      setUploadError(detail ?? messages.cotizaciones.acceptEvidenceUploadError);
+      return;
+    }
+    setIsUploading(false);
+
+    // 2) Sólo con `fileId` real del backend se dispara la mutación.
     accept.mutate({
       quoteId,
       accepterName: trimmedName,
       ...(org.trim().length > 0 ? { accepterOrg: org.trim() } : {}),
       medium: medium as AcceptanceMedium,
-      evidenceFileId: trimmedEvidence,
+      evidenceFileId: fileId,
       ...(notes.trim().length > 0 ? { notes: notes.trim() } : {}),
       proxy,
     });
   }
 
   const dialogDescriptionId = "accept-cotizacion-subtitle";
+  const fileInputId = "accept-cotizacion-evidence-file";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -240,7 +351,7 @@ export function AcceptCotizacionDialog({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={messages.cotizaciones.acceptNamePlaceholder}
-                disabled={accept.isPending}
+                disabled={accept.isPending || isUploading}
                 maxLength={160}
                 aria-describedby="accept-cotizacion-name-help"
               />
@@ -264,7 +375,7 @@ export function AcceptCotizacionDialog({
                 value={org}
                 onChange={(e) => setOrg(e.target.value)}
                 placeholder={messages.cotizaciones.acceptOrgPlaceholder}
-                disabled={accept.isPending}
+                disabled={accept.isPending || isUploading}
                 maxLength={160}
               />
             </div>
@@ -285,7 +396,7 @@ export function AcceptCotizacionDialog({
               onChange={(e) =>
                 setMedium(e.target.value as AcceptanceMedium | "")
               }
-              disabled={accept.isPending}
+              disabled={accept.isPending || isUploading}
               aria-describedby="accept-cotizacion-medium-help"
             >
               <option value="">
@@ -307,28 +418,61 @@ export function AcceptCotizacionDialog({
 
           <div className="space-y-1">
             <Label
-              htmlFor="accept-cotizacion-evidence"
+              htmlFor={fileInputId}
               className="text-sm font-medium"
             >
               {messages.cotizaciones.acceptEvidenceLabel}
             </Label>
-            <Input
-              id="accept-cotizacion-evidence"
+            <input
+              ref={fileInputRef}
+              id={fileInputId}
               data-testid="accept-cotizacion-evidence"
-              value={evidenceFileId}
-              onChange={(e) => setEvidenceFileId(e.target.value)}
-              placeholder={messages.cotizaciones.acceptEvidencePlaceholder}
-              disabled={accept.isPending}
+              type="file"
+              accept={ACCEPTED_FILE_ACCEPT_ATTR}
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null;
+                setEvidenceFile(f);
+                setUploadError(null);
+                setValidationError(null);
+              }}
+              disabled={accept.isPending || isUploading}
               aria-describedby="accept-cotizacion-evidence-help"
-              autoComplete="off"
-              spellCheck={false}
+              className="block w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             />
             <p
               id="accept-cotizacion-evidence-help"
               className="text-xs text-muted-foreground"
             >
-              {messages.cotizaciones.acceptEvidenceHelp}
+              {messages.cotizaciones.acceptEvidenceAcceptedTypesLabel}
             </p>
+            {evidenceFile ? (
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid="accept-cotizacion-evidence-summary"
+              >
+                {evidenceFile.name} · {evidenceFile.type || "?"} ·{" "}
+                {Math.ceil(evidenceFile.size / 1024)} KB
+              </p>
+            ) : null}
+            {!fileLooksValid && evidenceFile ? (
+              <p
+                role="alert"
+                className="text-xs text-destructive"
+                data-testid="accept-cotizacion-evidence-invalid"
+              >
+                {messages.cotizaciones.acceptEvidenceUploadError}
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={clearFileInput}
+              disabled={!evidenceFile || accept.isPending || isUploading}
+              data-testid="accept-cotizacion-evidence-clear"
+            >
+              Quitar archivo
+            </Button>
           </div>
 
           <div className="space-y-1">
@@ -345,7 +489,7 @@ export function AcceptCotizacionDialog({
               placeholder={messages.cotizaciones.acceptNotesPlaceholder}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              disabled={accept.isPending}
+              disabled={accept.isPending || isUploading}
               maxLength={500}
             />
           </div>
@@ -358,7 +502,7 @@ export function AcceptCotizacionDialog({
               className="mt-1 h-4 w-4 rounded border-input text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               checked={proxy}
               onChange={(e) => setProxy(e.target.checked)}
-              disabled={accept.isPending}
+              disabled={accept.isPending || isUploading}
               aria-describedby="accept-cotizacion-proxy-help"
             />
             <div className="space-y-1">
@@ -388,6 +532,16 @@ export function AcceptCotizacionDialog({
           </p>
         ) : null}
 
+        {uploadError ? (
+          <p
+            role="alert"
+            className="text-sm text-destructive"
+            data-testid="accept-cotizacion-upload-error"
+          >
+            {uploadError}
+          </p>
+        ) : null}
+
         {submitError ? (
           <p
             role="alert"
@@ -395,6 +549,16 @@ export function AcceptCotizacionDialog({
             data-testid="accept-cotizacion-submit-error"
           >
             {submitError}
+          </p>
+        ) : null}
+
+        {isUploading ? (
+          <p
+            role="status"
+            className="text-sm text-muted-foreground"
+            data-testid="accept-cotizacion-uploading"
+          >
+            {messages.cotizaciones.acceptEvidenceUploading}
           </p>
         ) : null}
 
@@ -448,7 +612,7 @@ export function AcceptCotizacionDialog({
                 type="button"
                 variant="outline"
                 onClick={() => onOpenChange(false)}
-                disabled={accept.isPending}
+                disabled={accept.isPending || isUploading}
                 data-testid="accept-cotizacion-cancel"
               >
                 {messages.cotizaciones.acceptCancel}
@@ -459,9 +623,11 @@ export function AcceptCotizacionDialog({
                 disabled={!canSubmit}
                 data-testid="accept-cotizacion-submit"
               >
-                {accept.isPending
-                  ? messages.cotizaciones.acceptSubmitting
-                  : messages.cotizaciones.acceptSubmit}
+                {isUploading
+                  ? messages.cotizaciones.acceptEvidenceUploading
+                  : accept.isPending
+                    ? messages.cotizaciones.acceptSubmitting
+                    : messages.cotizaciones.acceptSubmit}
               </Button>
             </>
           )}
