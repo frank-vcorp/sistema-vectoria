@@ -425,7 +425,7 @@ export function createInvoicesService(
           0x4d, 0x4f, 0x43, 0x4b, 0x5f, 0x50, 0x45, 0x4d,
         ])
       : Buffer.alloc(0);
-    return {
+return {
       apiKey,
       csdPassword,
       csdCer,
@@ -434,6 +434,53 @@ export function createInvoicesService(
       razonSocial: cfg.razonSocial,
       regimen: cfg.regimen,
     };
+}
+
+  /**
+   * IMPL-20260825-36 · intento 3 · `obtenerCredencialesTimbrar`
+   *
+   * Despacha entre `descifrarCredencialesPac` (BD, mock y otros PAC
+   * CSD-based) y credenciales vacías (HTTP / Facturapi). En modo HTTP
+   * el adaptador `createPacHttpClient` consume `FACTURAPI_API_KEY`
+   * desde el closure del factory (cargado al instanciar el servicio
+   * desde `router/facturacion.ts`). Llamar a la BD para descifrar
+   * `pacApiKeyCiphertext` sería un side-effect innecesario y, además,
+   * el secreto del env NO se persiste en BD ni en logs (ADR-03 §3.5).
+   *
+   * El secreto HTTP vive sólo en `process.env.FACTURAPI_API_KEY`
+   * (inyectado en `createPacHttpClient` por el router) y NO entra al
+   * snapshot de la factura.
+   */
+  function obtenerCredencialesTimbrar(orgId: string): Promise<{
+    apiKey: string;
+    csdPassword: string;
+    csdCer: Buffer | null;
+    csdPem: Buffer | null;
+    rfc: string | null;
+    razonSocial: string | null;
+    regimen: string | null;
+  }> {
+    if (process.env.PAC_MODE === "http") {
+      // HTTP / Facturapi: NO consultamos BD, NO desciframos nada.
+      // El apiKey efectivo vive en `process.env.FACTURAPI_API_KEY`
+      // (inyectado en `createPacHttpClient` al construir el factory
+      // desde el router). Devolvemos `apiKey: ""` sólo para satisfacer
+      // el contrato `PacStampInput`; el adaptador HTTP ignora este
+      // valor y usa su propio cierre.
+      return Promise.resolve({
+        apiKey: "",
+        csdPassword: "",
+        csdCer: Buffer.alloc(0),
+        csdPem: Buffer.alloc(0),
+        // `rfc/razonSocial/regimen` siguen leyéndose del snapshot de
+        // la fila `invoices` (no requieren BD lookup aquí). Devolvemos
+        // null para que el caller use el snapshot cuando esté disponible.
+        rfc: null,
+        razonSocial: null,
+        regimen: null,
+      });
+    }
+    return descifrarCredencialesPac(orgId);
   }
 
   // ── implementación del contrato ──────────────────────────────────────
@@ -678,7 +725,7 @@ export function createInvoicesService(
         );
       }
       const orgId = user.organization_id;
-      const creds = await descifrarCredencialesPac(orgId);
+      const creds = await obtenerCredencialesTimbrar(orgId);
       // 1) Localizar datos fiscales (snapshot ya existe).
       const snapshot = (row.clientFiscalDataSnapshot as Record<string, unknown>) ?? {};
       const receptor: PacReceptor = {
@@ -821,7 +868,7 @@ export function createInvoicesService(
         );
       }
       // Cancelar vía PAC (mock por ahora P-007-1).
-      const creds = await descifrarCredencialesPac(user.organization_id);
+      const creds = await obtenerCredencialesTimbrar(user.organization_id);
       const cancelResult = await pac.cancel({
         organizationId: user.organization_id,
         apiKey: creds.apiKey,

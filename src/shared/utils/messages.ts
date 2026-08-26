@@ -395,6 +395,8 @@ export const messages = {
       "No fue posible guardar los datos fiscales del cliente; la factura NO se construyó. Revisa el RFC y vuelve a intentar.",
     createInvoiceFiscalInvalidRFC:
       "RFC inválido. Verifica el formato (3-4 letras, 6 dígitos, 3 alfanuméricos).",
+    createInvoiceFiscalAddressMissing:
+      "El domicilio fiscal está incompleto. Captura calle, número, colonia, municipio, estado, CP y país antes de timbrar (BR-N218).",
     createInvoiceQuoteMissing:
       "No se pudo cargar la cotización asociada a la OS; refresca el detalle.",
     createInvoiceQuoteSubtotalFallback:

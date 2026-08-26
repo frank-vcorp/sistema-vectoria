@@ -197,22 +197,86 @@ export function createPacHttpClient(
    * el `Idempotency-Key` header (estándar) y, si la API soporta
    * upsert por `tax_id`, en reintentos con la misma RFC.
    *
-   * **Nota:** si `address` no tiene la forma exacta
+   * **Domicilio (intento 3):** mapea el snapshot interno
+   * `{calle, numero, colonia, municipio, estado, cp, pais}` al
+   * contrato Facturapi
    * `{street, exterior, interior, neighborhood, city, municipality,
-   * zip, state, country}` documentada, Facturapi puede rechazar la
-   * factura con 422 en `is_ready_to_stamp=false`. Eso lo gestiona el
-   * caller del servicio (`is_ready_to_stamp` check antes de
-   * `/stamp`).
+   * zip, state, country}`. No pasamos claves españolas. Si el
+   * snapshot NO tiene domicilio fiscal suficiente, lanzamos
+   * `INVOICE_FISCAL_DATA_REQUIRED` ANTES de llamar a Facturapi (sin
+   * inventar dirección).
    */
   function buildCustomerBody(rfc: string, receptor: PacReceptor) {
+    const address = mapDomicilioToFacturapi(receptor.domicilio);
     return {
       legal_name: receptor.razonSocial,
       tax_id: rfc,
       tax_system: receptor.regimenFiscal,
       email: receptor.email ?? undefined,
-      address: receptor.domicilio ?? undefined,
+      address,
       default_invoice_use: receptor.cfdiUse ?? "G03",
     };
+  }
+
+  /**
+   * Valida y mapea el domicilio fiscal interno al contrato
+   * `address` de Facturapi. Si el snapshot NO tiene los campos
+   * mínimos (`calle`, `numero`, `colonia`, `municipio`, `estado`,
+   * `cp`, `pais`), lanza `INVOICE_FISCAL_DATA_REQUIRED` (400)
+   * ANTES de cualquier llamada a Facturapi.
+   */
+  function mapDomicilioToFacturapi(
+    raw: PacReceptor["domicilio"],
+  ): Record<string, unknown> {
+    if (!raw || typeof raw !== "object") {
+      throw new DomainError(
+        "INVOICE_FISCAL_DATA_REQUIRED",
+        "El receptor no tiene domicilio fiscal; captura calle, número, colonia, municipio, estado, CP y país antes de timbrar (BR-N218)",
+        400,
+      );
+    }
+    const calle = readString(raw, ["calle", "street"]);
+    const numero = readString(raw, ["numero", "exterior"]);
+    const colonia = readString(raw, ["colonia", "neighborhood"]);
+    const municipio = readString(raw, ["municipio", "municipality"]);
+    const estado = readString(raw, ["estado", "state"]);
+    const cp = readString(raw, ["cp", "zip"]);
+    const pais = readString(raw, ["pais", "country"]);
+    const interior = readString(raw, ["interior", "interior_number"]);
+    if (!calle || !numero || !colonia || !municipio || !estado || !cp || !pais) {
+      throw new DomainError(
+        "INVOICE_FISCAL_DATA_REQUIRED",
+        "Domicilio fiscal incompleto (calle, número, colonia, municipio, estado, CP, país) — actualiza el cliente antes de timbrar (BR-N218)",
+        400,
+      );
+    }
+    const address: Record<string, unknown> = {
+      street: calle,
+      exterior: numero,
+      neighborhood: colonia,
+      // Facturapi acepta `city` y `municipality`. En México suelen
+      // coincidir (municipio libre). Default: ambos al valor del
+      // campo interno `municipio`.
+      city: municipio,
+      municipality: municipio,
+      zip: cp,
+      state: estado,
+      country: pais,
+    };
+    if (interior) address.interior = interior;
+    return address;
+  }
+
+  function readString(
+    obj: Record<string, unknown>,
+    keys: string[],
+  ): string {
+    for (const k of keys) {
+      const v = obj[k];
+      if (typeof v === "string" && v.trim().length > 0) return v.trim();
+      if (typeof v === "number") return String(v);
+    }
+    return "";
   }
 
   /**

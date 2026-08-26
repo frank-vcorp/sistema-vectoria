@@ -934,7 +934,15 @@ const stampInputSample: PacStampInput = {
     rfc: "XAXX010101000",
     razonSocial: "Cliente Test SA",
     regimenFiscal: "601",
-    domicilio: null,
+    domicilio: {
+      calle: "Blvd. Atardecer",
+      numero: "142",
+      colonia: "Centro",
+      municipio: "Huatabampo",
+      estado: "Sonora",
+      cp: "86500",
+      pais: "MEX",
+    },
     cfdiUse: "G03",
     email: null,
   },
@@ -1482,5 +1490,183 @@ describe("IMPL-20260825-36 · AC-3 · contrato documentado (docs.facturapi.io)",
       (r) => r.method === "GET" && /\/invoices\/[^/]+$/.test(r.url),
     );
     expect(getReq).toBeDefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-36 · AC-4 (intento 3 · QA V3) · Bypass BD en modo
+// HTTP, mapeo domicilio, rechazo sin domicilio, error UI en
+// facturas-list.tsx. La especificación del contrato Facturapi exige
+// domicilio fiscal completo para timbrar.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-36 · AC-4 · bypass BD HTTP + domicilio + error UI", () => {
+  it("mapea domicilio interno (calle/numero/...) a Facturapi (street/exterior/...)", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await pac.stamp(stampInputSample);
+    const customerBody = JSON.parse(
+      captured[0]?.body ?? "{}",
+    ) as { address?: Record<string, unknown> };
+    expect(customerBody.address).toBeDefined();
+    // Claves canónicas documentadas (NO claves españolas).
+    expect(customerBody.address?.street).toBe("Blvd. Atardecer");
+    expect(customerBody.address?.exterior).toBe("142");
+    expect(customerBody.address?.neighborhood).toBe("Centro");
+    expect(customerBody.address?.city).toBe("Huatabampo");
+    expect(customerBody.address?.municipality).toBe("Huatabampo");
+    expect(customerBody.address?.zip).toBe("86500");
+    expect(customerBody.address?.state).toBe("Sonora");
+    expect(customerBody.address?.country).toBe("MEX");
+    // Defensa: NO claves españolas en el body.
+    expect(customerBody.address?.calle).toBeUndefined();
+    expect(customerBody.address?.numero).toBeUndefined();
+    expect(customerBody.address?.colonia).toBeUndefined();
+    expect(customerBody.address?.municipio).toBeUndefined();
+    expect(customerBody.address?.estado).toBeUndefined();
+    expect(customerBody.address?.cp).toBeUndefined();
+    expect(customerBody.address?.pais).toBeUndefined();
+  });
+
+  it("rechaza con INVOICE_FISCAL_DATA_REQUIRED si domicilio está ausente", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await expect(
+      pac.stamp({
+        ...stampInputSample,
+        receptor: {
+          ...stampInputSample.receptor,
+          domicilio: null,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "INVOICE_FISCAL_DATA_REQUIRED",
+      statusCode: 400,
+    });
+    // NO debe haberse hecho ninguna llamada HTTP.
+    expect(captured.length).toBe(0);
+  });
+
+  it("rechaza con INVOICE_FISCAL_DATA_REQUIRED si domicilio está incompleto (sin cp)", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    const incomplete = { ...stampInputSample.receptor.domicilio };
+    delete (incomplete as Record<string, unknown>).cp;
+    await expect(
+      pac.stamp({
+        ...stampInputSample,
+        receptor: {
+          ...stampInputSample.receptor,
+          domicilio: incomplete,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "INVOICE_FISCAL_DATA_REQUIRED",
+      statusCode: 400,
+    });
+    expect(captured.length).toBe(0);
+  });
+
+  it("facturas-list.tsx: `onError` del timbrar + `role=\"alert\"` visible", () => {
+    // Verificación estática: el botón Timbrar debe mostrar el error
+    // de PAC con role="alert" y data-testid canónico para QA V3.
+    const src = readFileSync(
+      path.resolve(
+        __dirname,
+        "../src/modules/facturacion/facturas-list.tsx",
+      ),
+      "utf8",
+    );
+    // Estado timbrarError.
+    expect(src).toMatch(/useState<\s*string\s*\|\s*null\s*>\s*\(\s*null\s*\)/);
+    expect(src).toMatch(/setTimbrarError\(/);
+    // onError con mensaje estable (incluye INVOICE_FISCAL_DATA_REQUIRED
+    // mapeado a mensaje amigable).
+    expect(src).toMatch(/timbrar = trpc\.facturacion\.timbrar\.useMutation/);
+    expect(src).toMatch(/onError:/);
+    expect(src).toMatch(/INVOICE_FISCAL_DATA_REQUIRED/);
+    // Bloque <p role="alert"> con data-testid.
+    expect(src).toMatch(/role=["']alert["']/);
+    expect(
+      /data-testid=["']facturas-list-timbrar-error["']/.test(src),
+    ).toBe(true);
+  });
+
+  it("orden-detail.tsx: dialog captura domicilio completo + persiste via fiscal.upsert", () => {
+    // Verificación estática: el diálogo expone los 7 campos de
+    // domicilio y los envía a `clientes.fiscal.upsert.mutate({...,
+    // domicilio: {...}})`. La validación cliente exige los 7 campos
+    // antes de upsert.
+    const src = readFileSync(
+      path.resolve(
+        __dirname,
+        "../src/modules/orden-servicio/orden-detail.tsx",
+      ),
+      "utf8",
+    );
+    for (const id of [
+      "ci-calle",
+      "ci-numero",
+      "ci-colonia",
+      "ci-municipio",
+      "ci-estado",
+      "ci-cp",
+      "ci-pais",
+    ]) {
+      expect(new RegExp(`id=["']${id}["']`).test(src)).toBe(true);
+    }
+    // Persistencia via fiscal.upsert.
+    expect(src).toMatch(/fiscalUpsert\.mutate\(/);
+    expect(src).toMatch(/domicilio:\s*\{[\s\S]*?calle,?[\s\S]*?numero,?[\s\S]*?cp,?[\s\S]*?pais,?[\s\S]*?\}/);
+  });
+
+  it("invoices.ts: en modo HTTP NO consulta BD (sin descifrarCredencialesPac en timbrar)", () => {
+    // Verificación estática: la función `obtenerCredencialesTimbrar`
+    // hace early-return con credenciales vacías cuando `PAC_MODE=http`.
+    // El adaptador HTTP usa `FACTURAPI_API_KEY` desde el closure,
+    // NO desde BD.
+    const src = readFileSync(
+      path.resolve(
+        __dirname,
+        "../src/server/services/facturacion/invoices.ts",
+      ),
+      "utf8",
+    );
+    expect(src).toMatch(/function obtenerCredencialesTimbrar/);
+    expect(src).toMatch(/process\.env\.PAC_MODE\s*===\s*["']http["']/);
+    // El early-return NO llama a loadFiscalConfig.
+    expect(src).toMatch(/return Promise\.resolve\(\{[\s\S]*?apiKey:\s*["']["']/);
+    // Las llamadas a `obtenerCredencialesTimbrar` están en timbrar y
+    // cancel (NO `descifrarCredencialesPac`).
+    const timbrarBlock = src.match(
+      /async function timbrar\([\s\S]*?async function cancel/,
+    );
+    expect(timbrarBlock).not.toBeNull();
+    expect(/obtenerCredencialesTimbrar\(/.test(timbrarBlock![0])).toBe(true);
+    // NO `descifrarCredencialesPac` en timbrar/cancel (sólo en el
+    // helper `obtenerCredencialesTimbrar` mismo).
+    expect(/descifrarCredencialesPac\(/.test(timbrarBlock![0])).toBe(false);
   });
 });

@@ -52,6 +52,39 @@ interface OrdenDetailProps {
   id: string;
 }
 
+/**
+ * IMPL-20260825-36 (intento 3) · Extrae el domicilio fiscal del
+ * snapshot de `clientes.fiscal.getForClient` (mismo shape que
+ * `ClientFiscalUpsertInputSchema.domicilio`):
+ * `{calle, numero, colonia, municipio, estado, cp, pais}`. Sólo
+ * devuelve los campos presentes y no-empty; los nullables se omiten
+ * para no enviar claves vacías a `fiscal.upsert` (que rechaza con
+ * `INVALID_FISCAL_DATA` cuando algún campo está vacío junto a otros
+ * poblados).
+ */
+function extractDomicilio(
+  raw: unknown,
+): {
+  calle?: string;
+  numero?: string;
+  colonia?: string;
+  municipio?: string;
+  estado?: string;
+  cp?: string;
+  pais?: string;
+  interior?: string;
+} {
+  if (!raw || typeof raw !== "object") return {};
+  const o = raw as Record<string, unknown>;
+  const out: ReturnType<typeof extractDomicilio> = {};
+  const keys = ["calle", "numero", "colonia", "municipio", "estado", "cp", "pais", "interior"] as const;
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === "string" && v.trim().length > 0) out[k] = v.trim();
+  }
+  return out;
+}
+
 export function OrdenDetail({ id }: OrdenDetailProps) {
   const utils = trpc.useUtils();
   const detail = trpc.ordenServicio.byId.useQuery({ orderId: id });
@@ -965,6 +998,7 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
             razonSocial: fiscalQuery.data?.razonSocial ?? "",
             regimen: fiscalQuery.data?.regimen ?? "",
             cfdiUse: fiscalQuery.data?.cfdiUse ?? "",
+            domicilio: extractDomicilio(fiscalQuery.data?.domicilio),
           }}
           defaultDueDate={defaultDueDate}
           defaultDescription={createInvoiceDescription}
@@ -1019,6 +1053,34 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
             const razonSocialTrim = (input.razonSocial ?? "").trim();
             const regimen = (input.regimen ?? "").trim();
             const cfdiUse = (input.cfdiUse ?? "").trim();
+            // IMPL-20260825-36 (intento 3) · Domicilio fiscal:
+            // timbrar contra Facturapi exige 7 campos mínimos. El
+            // formulario los captura y los persiste vía
+            // `clientes.fiscal.upsert`. Validamos ANTES de upsert para
+            // mostrar el error con `role="alert"` y NO enviar un body
+            // incompleto al PAC.
+            const dom = input.domicilio;
+            const calle = (dom?.calle ?? "").trim();
+            const numero = (dom?.numero ?? "").trim();
+            const colonia = (dom?.colonia ?? "").trim();
+            const municipio = (dom?.municipio ?? "").trim();
+            const estado = (dom?.estado ?? "").trim();
+            const cp = (dom?.cp ?? "").trim();
+            const pais = (dom?.pais ?? "").trim().toUpperCase();
+            if (
+              !calle ||
+              !numero ||
+              !colonia ||
+              !municipio ||
+              !estado ||
+              !cp ||
+              !pais
+            ) {
+              setCreateInvoiceError(
+                messages.ordenes.createInvoiceFiscalAddressMissing,
+              );
+              return;
+            }
             if (!rfc || !razonSocialTrim || !regimen) {
               setCreateInvoiceError(
                 messages.ordenes.createInvoiceFiscalMissing,
@@ -1046,6 +1108,15 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
                     razonSocial: razonSocialTrim,
                     regimen,
                     ...(cfdiUse ? { cfdiUse } : {}),
+                    domicilio: {
+                      calle,
+                      numero,
+                      colonia,
+                      municipio,
+                      estado,
+                      cp,
+                      pais,
+                    },
                   },
                   {
                     onSuccess: () => resolve(),
@@ -1147,6 +1218,16 @@ function CreateInvoiceDraftDialog({
     razonSocial: string;
     regimen: string;
     cfdiUse: string;
+    domicilio: {
+      calle?: string;
+      numero?: string;
+      colonia?: string;
+      municipio?: string;
+      estado?: string;
+      cp?: string;
+      pais?: string;
+      interior?: string;
+    };
   };
   defaultDueDate: string;
   defaultDescription: string;
@@ -1160,6 +1241,16 @@ function CreateInvoiceDraftDialog({
     razonSocial: string;
     regimen: string;
     cfdiUse: string;
+    domicilio: {
+      calle: string;
+      numero: string;
+      colonia: string;
+      municipio: string;
+      estado: string;
+      cp: string;
+      pais: string;
+      interior?: string;
+    };
   }) => void | Promise<void>;
   onClose: () => void;
 }) {
@@ -1173,6 +1264,23 @@ function CreateInvoiceDraftDialog({
   );
   const [regimen, setRegimen] = React.useState(fiscalPreFill.regimen);
   const [cfdiUse, setCfdiUse] = React.useState(fiscalPreFill.cfdiUse);
+  // IMPL-20260825-36 (intento 3) · Domicilio fiscal: pre-rellenado
+  // desde `clientes.fiscal.getForClient` (FiscalPanel previo). El
+  // formulario exige los 7 campos mínimos para timbrar con Facturapi
+  // (BR-N218 + ADR-20260825-01).
+  const [calle, setCalle] = React.useState(fiscalPreFill.domicilio.calle ?? "");
+  const [numero, setNumero] = React.useState(
+    fiscalPreFill.domicilio.numero ?? "",
+  );
+  const [colonia, setColonia] = React.useState(
+    fiscalPreFill.domicilio.colonia ?? "",
+  );
+  const [municipio, setMunicipio] = React.useState(
+    fiscalPreFill.domicilio.municipio ?? "",
+  );
+  const [estado, setEstado] = React.useState(fiscalPreFill.domicilio.estado ?? "");
+  const [cp, setCp] = React.useState(fiscalPreFill.domicilio.cp ?? "");
+  const [pais, setPais] = React.useState(fiscalPreFill.domicilio.pais ?? "MEX");
   // Sincroniza el valor unitario y los datos fiscales cuando el
   // padre los actualiza (ej. tras refetch de la cotización).
   React.useEffect(() => {
@@ -1183,11 +1291,25 @@ function CreateInvoiceDraftDialog({
     setRazonSocial(fiscalPreFill.razonSocial);
     setRegimen(fiscalPreFill.regimen);
     setCfdiUse(fiscalPreFill.cfdiUse);
+    setCalle(fiscalPreFill.domicilio.calle ?? "");
+    setNumero(fiscalPreFill.domicilio.numero ?? "");
+    setColonia(fiscalPreFill.domicilio.colonia ?? "");
+    setMunicipio(fiscalPreFill.domicilio.municipio ?? "");
+    setEstado(fiscalPreFill.domicilio.estado ?? "");
+    setCp(fiscalPreFill.domicilio.cp ?? "");
+    setPais(fiscalPreFill.domicilio.pais ?? "MEX");
   }, [
     fiscalPreFill.rfc,
     fiscalPreFill.razonSocial,
     fiscalPreFill.regimen,
     fiscalPreFill.cfdiUse,
+    fiscalPreFill.domicilio.calle,
+    fiscalPreFill.domicilio.numero,
+    fiscalPreFill.domicilio.colonia,
+    fiscalPreFill.domicilio.municipio,
+    fiscalPreFill.domicilio.estado,
+    fiscalPreFill.domicilio.cp,
+    fiscalPreFill.domicilio.pais,
   ]);
   return (
     <div
@@ -1308,6 +1430,91 @@ function CreateInvoiceDraftDialog({
                   data-testid="orden-detail-create-invoice-dialog-cfdi-use"
                 />
               </div>
+              {/* IMPL-20260825-36 (intento 3) · Domicilio fiscal —
+                  campos requeridos por Facturapi (BR-N218 +
+                  ADR-20260825-01). El snapshot del cliente
+                  (`FiscalPanel` previo) los pre-rellena; el usuario
+                  puede ajustarlos. La validación al submit exige los
+                  7 campos mínimos. */}
+              <div className="col-span-2 grid gap-2 md:grid-cols-2">
+                <div>
+                  <Label htmlFor="ci-calle">
+                    Calle
+                  </Label>
+                  <Input
+                    id="ci-calle"
+                    value={calle}
+                    onChange={(e) => setCalle(e.target.value)}
+                    data-testid="orden-detail-create-invoice-dialog-calle"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="ci-numero">
+                    Número exterior
+                  </Label>
+                  <Input
+                    id="ci-numero"
+                    value={numero}
+                    onChange={(e) => setNumero(e.target.value)}
+                    data-testid="orden-detail-create-invoice-dialog-numero"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="ci-colonia">
+                    Colonia
+                  </Label>
+                  <Input
+                    id="ci-colonia"
+                    value={colonia}
+                    onChange={(e) => setColonia(e.target.value)}
+                    data-testid="orden-detail-create-invoice-dialog-colonia"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="ci-municipio">
+                    Municipio
+                  </Label>
+                  <Input
+                    id="ci-municipio"
+                    value={municipio}
+                    onChange={(e) => setMunicipio(e.target.value)}
+                    data-testid="orden-detail-create-invoice-dialog-municipio"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="ci-estado">
+                    Estado
+                  </Label>
+                  <Input
+                    id="ci-estado"
+                    value={estado}
+                    onChange={(e) => setEstado(e.target.value)}
+                    data-testid="orden-detail-create-invoice-dialog-estado"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="ci-cp">
+                    Código postal
+                  </Label>
+                  <Input
+                    id="ci-cp"
+                    value={cp}
+                    onChange={(e) => setCp(e.target.value)}
+                    data-testid="orden-detail-create-invoice-dialog-cp"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="ci-pais">
+                    País
+                  </Label>
+                  <Input
+                    id="ci-pais"
+                    value={pais}
+                    onChange={(e) => setPais(e.target.value.toUpperCase())}
+                    data-testid="orden-detail-create-invoice-dialog-pais"
+                  />
+                </div>
+              </div>
             </div>
             <p className="mt-2 break-all text-xs text-muted-foreground">
               Cliente: <span className="font-mono">{clientId}</span>
@@ -1351,6 +1558,15 @@ function CreateInvoiceDraftDialog({
                 razonSocial,
                 regimen,
                 cfdiUse,
+                domicilio: {
+                  calle,
+                  numero,
+                  colonia,
+                  municipio,
+                  estado,
+                  cp,
+                  pais,
+                },
               })
             }
             disabled={

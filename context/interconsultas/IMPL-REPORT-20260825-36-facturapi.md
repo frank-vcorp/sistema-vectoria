@@ -5,11 +5,11 @@ Estado: READY_FOR_VERIFYING
 SPEC: SPEC-20260817-007 (Facturación CFDI) actualizada
 ADR: ADR-20260825-01-integracion-facturapi
 Decisión: DEC-FUN-20260825-01 (Facturapi como PAC HTTP v2)
-Discovery refs: probe real `GET https://www.facturapi.io/v2/customers?limit=1` HTTP 200 con Test Secret Key; revisión oficial contra `docs.facturapi.io/api`
+Discovery refs: probe real `GET https://www.facturapi.io/v2/customers?limit=1` HTTP 200 con Test Secret Key; revisión oficial contra `docs.facturapi.io/api`; QA V3 staging `lista/preview` 200 OK + timbrar 412 por gate BD
 Origen handoff: ATLAS (turno continuo)
 Fecha: 2026-08-25 (turno continuo)
 Implementador: SOFIA
-Intento: 2 (IMPLEMENTATION_DEFECT dentro IMPL-20260825-36, revisión oficial pre-commit)
+Intento: 3 (IMPLEMENTATION_DEFECT dentro IMPL-20260825-36, QA V3 staging)
 Proveedor activo previo: FacturoPorTi (ADR-20260817-09, ahora `superseded`)
 Proveedor activo nuevo: Facturapi v2 (ADR-20260825-01)
 ---
@@ -24,6 +24,83 @@ proveedor previo (FacturoPorTi, ADR-20260817-09 ahora
 frontera `PacClient` ya existente, **sin tocar el router, el servicio
 de facturación ni el schema**. La mock se conserva intacta para
 tests y para el default local.
+
+## Delta intento 3 (QA V3 staging: 412 en timbrar + domicilio fiscal)
+
+QA V3 reprodujo un bug en staging: `lista/preview` retornaban 200 OK
+pero `timbrar` seguía 412 porque `descifrarCredencialesPac` ejecutaba
+el gate de BD (CSD/API key) antes del adapter HTTP. Cuatro fixes
+dínados:
+
+**A. Bypass BD en modo HTTP para `timbrar` y `cancel`.**
+Nueva función `obtenerCredencialesTimbrar(orgId)` en
+`src/server/services/facturacion/invoices.ts`. Cuando
+`process.env.PAC_MODE === "http"`, hace early-return con credenciales
+vacías (`apiKey: ""`, `csdCer/csdPem: Buffer.alloc(0)`); el secreto
+efectivo sigue siendo `FACTURAPI_API_KEY` del closure de
+`createPacHttpClient` (inyectado por el router al instanciar el
+servicio). NO se consulta BD, NO se descifra `pacApiKeyCiphertext`,
+NO se persiste el secreto env en BD ni en logs. Para mock y otros
+PAC CSD-based, el comportamiento sigue siendo el del intento 1/2
+(BD gate activo). `timbrar` y `cancel` ahora llaman a
+`obtenerCredencialesTimbrar` en lugar de `descifrarCredencialesPac`.
+
+**B. Mapeo domicilio interno → Facturapi.**
+`facturapi.ts` añade `mapDomicilioToFacturapi(raw)`:
+- Internas: `{calle, numero, colonia, municipio, estado, cp, pais}`.
+- Externas (Facturapi): `{street, exterior, neighborhood, city,
+  municipality, zip, state, country}`.
+- `municipio` → `city` Y `municipality` (en México suelen coincidir).
+- `interior` (opcional) → `interior` (sólo si presente).
+- NO se pasan claves españolas: el adapter normaliza las claves
+  antes de POST `/customers`. Defensa en profundidad.
+- **Validación pre-POST**: si el snapshot no tiene los 7 campos
+  mínimos no-vacíos, lanza `INVOICE_FISCAL_DATA_REQUIRED` (400) SIN
+  llamar a Facturapi. El caller puede así editar el cliente y
+  reintentar. Sin inventar dirección.
+
+**C. Dialog captura domicilio fiscal.**
+`CreateInvoiceDraftDialog` (en `orden-detail.tsx`) añade 7 inputs:
+`calle, numero, colonia, municipio, estado, cp, pais`. Se pre-rellenan
+desde `fiscalQuery.data?.domicilio` (FiscalPanel previo) vía
+`extractDomicilio(raw)`. El handler `onSubmit` los envía a
+`clientes.fiscal.upsert({...domicilio:{calle, numero, colonia,
+municipio, estado, cp, pais}})` antes de `buildFromOrder`. La
+validación cliente exige los 7 campos no-vacíos antes del upsert; el
+mensaje canónico es `createInvoiceFiscalAddressMissing` (en
+`messages.ordenes`). Sin auto-fill ficticio: si el snapshot está
+vacío, los inputs nacen vacíos y el usuario los completa.
+
+**D. Error UI visible en Timbrar.**
+`facturas-list.tsx`: la mutación `timbrar` añade `onError(err)`
+que mapea `INVOICE_FISCAL_DATA_REQUIRED` a un mensaje amigable
+("Domicilio fiscal incompleto. Captura calle, número, colonia,
+municipio, estado, CP y país antes de timbrar."); cualquier otro
+error muestra `err.message`. El estado `timbrarError` se renderiza
+con `<p role="alert" aria-live="assertive"
+data-testid="facturas-list-timbrar-error">` debajo de los botones.
+Sin esto, 412/422/5xx quedaban silenciosos y el usuario veía "falso
+éxito" porque el botón volvía a habilitarse sin feedback.
+
+**E. No se duplica el draft, no se duplican subtotal/IVA/idempotencia/XML/PDF.**
+El flujo `Crear factura borrador` de IMPL-34 sigue intacto
+(`clientes.fiscal.upsert` → `buildFromOrder`); sólo ampliamos el
+payload del upsert con `domicilio`. El timbrado sigue el contrato
+existente: POST `/customers` → POST `/invoices` (`status:draft`,
+idempotencia via `Idempotency-Key` + `idempotency_key` body) →
+POST `/invoices/{id}/stamp` → GET `/invoices/{id}` fallback →
+GET `/invoices/{id}/xml` + `/pdf` como Buffer. La UI del modal
+no se duplica; sólo se amplía con los 7 inputs.
+
+**Por qué NO es SPEC-GAP.** El requisito de domicilio fiscal es
+**técnico explícito de Facturapi** para timbrar (`is_ready_to_stamp`
+lo requiere). No contradice ningún criterio funcional previamente
+confirmado (los criterios AC-1..AC-4 de SPEC-007 hablan de
+`gestionar_facturacion` + `timbrar_facturas` + XML/PDF/UUID; el
+domicilio fiscal es pre-requisito del PAC, no nueva regla de
+producto). Es implementación mínima reversible: si la API de
+Facturapi cambiara, basta relajar la validación en
+`mapDomicilioToFacturapi`.
 
 ## Delta intento 2 (revisión oficial pre-commit)
 
@@ -103,15 +180,18 @@ Decisiones operativas (cumple ADR-20260825-01):
   cierre administrativo y resto de SPEC-008/011 siguen en sus
   incrementos posteriores (reglas de scope del handoff).
 
-## Archivos modificados (4)
+## Archivos modificados (5)
 
 | Archivo | Cambio |
 |---|---|
-| `src/server/integrations/pac/facturapi.ts` | **Nuevo**. `createPacHttpClient(opts)` implementa `PacClient` con fetch estándar. Métodos: `stamp` (POST /customers con `Idempotency-Key` header y body documentado `legal_name/tax_id/tax_system/email/address/default_invoice_use` → POST /invoices con `status=draft`, `external_id`, `idempotency_key` y `items[].product={description, product_key, price, tax_included:false}` → check `is_ready_to_stamp` → POST /invoices/{id}/stamp → **GET /invoices/{id} fallback si `uuid` falta** → GET /invoices/{id}/xml + /pdf como Buffer) y `cancel` (POST /invoices/{uuid}/cancel con `{motivo}`). Mapeo de errores 401/403/404/409/422/429/5xx a `DomainError`/`PacTransientError`. Timeout 15s default. `sanitizeMessage` enmascara `sk_test_*`/`sk_live_*`. Logger seguro a `process.stderr` (nunca `stdout`). |
+| `src/server/integrations/pac/facturapi.ts` | **Nuevo**. `createPacHttpClient(opts)` implementa `PacClient` con fetch estándar. Métodos: `stamp` (POST /customers con `Idempotency-Key` header y body documentado `legal_name/tax_id/tax_system/email/address/default_invoice_use` → POST /invoices con `status=draft`, `external_id`, `idempotency_key` y `items[].product={description, product_key, price, tax_included:false}` → check `is_ready_to_stamp` → POST /invoices/{id}/stamp → **GET /invoices/{id} fallback si `uuid` falta** → GET /invoices/{id}/xml + /pdf como Buffer) y `cancel` (POST /invoices/{uuid}/cancel con `{motivo}`). **Mapeo domicilio interno (`calle/numero/...`) → Facturapi (`street/exterior/...`) en `mapDomicilioToFacturapi` con validación pre-POST (`INVOICE_FISCAL_DATA_REQUIRED` si falta algún campo)**. Mapeo de errores 401/403/404/409/422/429/5xx a `DomainError`/`PacTransientError`. Timeout 15s default. `sanitizeMessage` enmascara `sk_test_*`/`sk_live_*`. Logger seguro a `process.stderr` (nunca `stdout`). |
 | `src/server/integrations/pac/index.ts` | `createPacClient(opts?)` ahora dispatcha por `mode` o env (`PAC_MODE=http` + `FACTURAPI_API_KEY` → HTTP, sino mock). Re-exporta `createPacHttpClient` y `FacturapiHttpClientOptions`. `createPacMockClient` y los códigos canónicos (`PAC_API_KEY_MISSING`, `CSD_NOT_CONFIGURED`, `INVALID_CANCEL_MOTIVE`) intactos. |
-| `src/server/services/facturacion/invoices.ts` | `descifrarCredencialesPac`: el guard de CSD se aplica sólo si `PAC_MODE !== "http"` (línea `:387-394`). El descifrado de `csd_password_ciphertext` es tolerante a `null`; los `Buffer.from([...])` del CSD se sustituyen por `Buffer.alloc(0)` cuando `csdCerBucketKey`/`csdPemBucketKey` faltan. La interfaz `PacStampInput` (`csdCer: Buffer`) sigue recibiendo bytes no-nulos (vacíos válidos para Facturapi). |
+| `src/server/services/facturacion/invoices.ts` | (intento 1/2) `descifrarCredencialesPac`: el guard de CSD se aplica sólo si `PAC_MODE !== "http"`. **(intento 3)** Nueva función `obtenerCredencialesTimbrar(orgId)` que bypassa BD en modo HTTP (early-return con credenciales vacías; el secreto efectivo vive en `FACTURAPI_API_KEY` del closure de `createPacHttpClient`). `timbrar` y `cancel` llaman a `obtenerCredencialesTimbrar` en lugar de `descifrarCredencialesPac`. Para mock y otros PAC CSD-based, el comportamiento sigue siendo el del intento 1/2. El descifrado de `csd_password_ciphertext` es tolerante a `null`; los `Buffer.from([...])` del CSD se sustituyen por `Buffer.alloc(0)` cuando `csdCerBucketKey`/`csdPemBucketKey` faltan. La interfaz `PacStampInput` (`csdCer: Buffer`) sigue recibiendo bytes no-nulos (vacíos válidos para Facturapi). |
 | `src/server/trpc/routers/facturacion.ts` | `buildService()` llama `createPacClient()` sin args (auto-detecta por env). El router NO lee env directamente (delegado al factory en capa infra). |
-| `tests/spec-20260817-007.test.ts` | (intento 1) **+18 tests** (AC-1 Facturapi + AC-2 dispatch).<br/>(intento 2) **+5 tests** (AC-3 contrato documentado): shape `items[].product={description, product_key, price, tax_included}` con `price` en pesos y SIN campos inventados (`unit_price`, `factor`, `base`, `amount`); `default_invoice_use` en customer body sin `external_id`; `idempotency_key` + `external_id` en invoice body; GET `/invoices/{id}` fallback cuando `/stamp` no devuelve `uuid`; degradación controlada a `id` cuando ambos endpoints carecen de `uuid`.<br/>**Total: 23 tests** específicos de Facturapi. |
+| `src/modules/orden-servicio/orden-detail.tsx` | (intento 3) `CreateInvoiceDraftDialog` añade campos `calle/numero/colonia/municipio/estado/cp/pais` pre-rellenados desde `clientes.fiscal.getForClient`. El handler `onSubmit` los envía a `clientes.fiscal.upsert({...domicilio:{...}})` antes de `buildFromOrder`. Validación cliente exige los 7 campos no-vacíos; mensaje canónico `createInvoiceFiscalAddressMissing`. |
+| `src/modules/facturacion/facturas-list.tsx` | (intento 3) La mutación `timbrar` añade `onError(err)` que mapea `INVOICE_FISCAL_DATA_REQUIRED` a mensaje amigable. Estado local `timbrarError` se renderiza con `<p role="alert" aria-live="assertive" data-testid="facturas-list-timbrar-error">` debajo de los botones. |
+| `src/shared/utils/messages.ts` | (intento 3) Nueva clave `createInvoiceFiscalAddressMissing` para el error de domicilio fiscal incompleto. |
+| `tests/spec-20260817-007.test.ts` | (intento 1) **+18 tests** (AC-1 Facturapi + AC-2 dispatch).<br/>(intento 2) **+5 tests** (AC-3 contrato documentado): shape `items[].product={description, product_key, price, tax_included}` con `price` en pesos y SIN campos inventados (`unit_price`, `factor`, `base`, `amount`); `default_invoice_use` en customer body sin `external_id`; `idempotency_key` + `external_id` en invoice body; GET `/invoices/{id}` fallback cuando `/stamp` no devuelve `uuid`; degradación controlada a `id` cuando ambos endpoints carecen de `uuid`.<br/>(intento 3) **+6 tests** (AC-4 bypass HTTP + domicilio + error UI): mapeo domicilio `calle/numero/...` → `street/exterior/...` con rechazo de claves españolas; rechazo `INVOICE_FISCAL_DATA_REQUIRED` cuando domicilio ausente o incompleto (sin HTTP); `facturas-list.tsx` tiene `onError` + `role="alert"` + `data-testid="facturas-list-timbrar-error"`; `orden-detail.tsx` expone los 7 inputs de domicilio y los envía a `fiscalUpsert.mutate({domicilio: {...}})`; `invoices.ts` define `obtenerCredencialesTimbrar` con `PAC_MODE=http` y `timbrar`/`cancel` ya NO usan `descifrarCredencialesPac` directamente.<br/>**Total: 29 tests** específicos de Facturapi. |
 
 **Sin cambios en:** schema (`organization_fiscal_config`,
 `invoices`), `pac.ts`/router de tRPC, permisos `gestionar_facturacion`
@@ -121,10 +201,11 @@ existentes), `package.json` (sin deps nuevas).
 ## Validación
 
 - **typecheck (`pnpm typecheck`)**: **PASS** (sin output, exit 0).
-- **tests (V2 completa, `pnpm test`)**: **967/967 PASS** en 32
-  ficheros · 7.34 s
-  - `tests/spec-20260817-007.test.ts`: **74/74** (51 originales +
-    **23 nuevos** Facturapi: 18 intento 1 + 5 intento 2 AC-3
+- **tests (V2 completa, `pnpm test`)**: **973/973 PASS** en 32
+  ficheros · 8.84 s
+  - `tests/spec-20260817-007.test.ts`: **80/80** (51 originales +
+    **29 nuevos** Facturapi: 18 intento 1 + 5 intento 2 AC-3 + 6
+    intento 3 AC-4 bypass/domicilio/UI).
     contrato documentado).
   - `tests/impl-20260825-34.test.ts` (intento 3): **65/65** (sin
     regresión).
@@ -138,10 +219,42 @@ existentes), `package.json` (sin deps nuevas).
   errores).
 - **Ejecución real contra Facturapi:** NO EJECUTADA en este corte.
   La probe `GET /v2/customers?limit=1` con la Test Secret Key ya pasó
-  HTTP 200 antes del handoff (referenciada en el prompt). El
+  HTTP 200 antes del handoff (referenciada en el prompt). QA V3
+  confirmó `lista/preview` 200 OK contra staging pero `timbrar` 412
+  por el gate BD — FIX aplicado en intento 3. El
   end-to-end con `POST /invoices` + `POST /invoices/{id}/stamp` +
   GET `/invoices/{id}` fallback + descargas queda pendiente al gate
   V3 (GEMINI con Playwright).
+
+## Decisiones internas reversibles (intento 3)
+
+- **Bypass BD sólo en modo HTTP:** `obtenerCredencialesTimbrar`
+  decide por `process.env.PAC_MODE`. Esto evita consultas
+  innecesarias a BD cuando el secreto HTTP vive en env cifrado. Si
+  Frank migra a otro PAC CSD-based, basta invertir la condición:
+  llamar `descifrarCredencialesPac` siempre y exigir `apiKey + CSD`.
+
+- **Domicilio fiscal obligatorio para timbrar:** la API de
+  Facturapi rechaza facturas sin domicilio completo del receptor
+  (`is_ready_to_stamp=false`). La UI exige los 7 campos antes del
+  upsert para evitar errores 422 posteriores. Es requisito técnico
+  del PAC, NO nueva regla de producto. Si Facturapi cambiara la
+  regla, basta relajar `mapDomicilioToFacturapi` (devolver domicilio
+  vacío o parcial).
+
+- **Domicilio pre-rellenado desde `FiscalPanel`:** `clientes.fiscal
+  .getForClient` ya devuelve el domicilio si existe; lo reutilizamos
+  para no duplicar captura. NO auto-rellenamos con valores ficticios.
+
+- **`onError` mapea `INVOICE_FISCAL_DATA_REQUIRED` a mensaje
+  amigable:** sin el mape el mensaje crudo "INVOICE_FISCAL_DATA_REQUIRED"
+  es críptico. Con el mape, el PL ve el texto que el formulario
+  ya exige y sabe exactamente qué corregir.
+
+- **NO se reescribe `facturas-list.tsx` arquitectura:** sólo se añade
+  estado local + bloque `role="alert"`. La estructura del componente
+  (Card con botones) se conserva. Si ATLAS quiere consolidar los
+  errores UI de la lista en un sólo banner, es un refactor mayor.
 
 ## Decisiones internas reversibles (intento 2)
 
@@ -233,7 +346,27 @@ existentes), `package.json` (sin deps nuevas).
 | AC-11 · Actualizar IMPL-REPORT con evidencia y riesgos | Este documento | n/a |
 | AC-12 · typecheck, tests dirigidos, suite V2 y lint propio; READY_FOR_VERIFYING | typecheck PASS; suite V2 962/962; lint 0 nuevos | Bloque "Validación" arriba |
 
-## Riesgos y desviaciones
+## Riesgos y desviaciones (intento 3)
+
+- **`is_ready_to_stamp=false` mitigado (intento 3).** El formulario
+  de "Crear factura borrador" exige los 7 campos de domicilio fiscal
+  antes del upsert y `mapDomicilioToFacturapi` revalida antes del
+  POST. Si el cliente no tiene domicilio fiscal completo, el
+  servicio aborta con `INVOICE_FISCAL_DATA_REQUIRED` (400) SIN
+  llamar a Facturapi. El usuario completa el domicilio y reintenta.
+
+- **Bypass BD en modo HTTP (intento 3).** El secreto
+  `FACTURAPI_API_KEY` vive sólo en env cifrado de Coolify. No se
+  persiste en BD ni en logs. `obtenerCredencialesTimbrar` retorna
+  credenciales vacías para satisfacer el contrato `PacStampInput`;
+  el adaptador HTTP usa su propio closure. Si Frank migra a otro
+  PAC CSD-based, basta invertir la condición en
+  `obtenerCredencialesTimbrar`.
+
+- **Error UI visible (intento 3).** El botón Timbrar muestra
+  `role="alert"` con mensaje amigable. Sin este mape el error 412
+  quedaba silencioso y el usuario veía "falso éxito" porque el
+  botón volvía a habilitarse.
 
 - **Riesgo bajo.** Sustitución de proveedor sin cambio de contrato
   público (mismas firmas `pac.stamp`/`pac.cancel`); el caller
@@ -241,21 +374,17 @@ existentes), `package.json` (sin deps nuevas).
   presencia del secreto. Si Frank provee un secreto inválido en
   staging, `facturapi.stamp` fallará con `PAC_API_KEY_MISSING` (412)
   y el servicio lo mapeará a error canónico para el cliente.
-- **`is_ready_to_stamp === false` en producción:** si un cliente no
-  tiene dirección fiscal completa (CP, calle, municipio, estado) la
-  factura se quedará como `borrador` eternamente. Defensa: el servicio
-  exige RFC/razón social/régimen vía `clientes.fiscal.upsert` (IMPL-34)
-  pero NO exige domicilio completo. Documentado: el siguiente
-  incremento (probablemente IMPL-37) ampliará el formulario fiscal
-  con domicilio cuando Facturapi devenga más errores `is_ready_to_stamp`.
+
 - **`sk_test_*` filter regex limitado a `[A-Za-z0-9_-]`:** si el
   secreto contiene caracteres fuera de este set, la sanitización NO
   los enmascara. Defensa: validar formato `sk_test_*` y `sk_live_*`
   al cargar la key (sólo ASCII base64). Documentado.
+
 - **Live/producción NO activado:** este corte sólo valida el camino
   Test. Producción requiere `sk_live_*` + autorización explícita de
   Frank + revisión de cumplimiento fiscal; queda fuera de alcance
   según ADR-20260825-01.
+
 - **Cobros / cierre NO implementados:** el adaptador NO expone
   endpoints de pagos, sólo timbrado y cancelación. La cancelación
   para motivo `01`/`02` (factura sustituta) NO soporta
@@ -323,32 +452,41 @@ siguen funcionando idénticos).
 
 ## Pendientes ATLAS
 
-- **Redeploy + Gate final GEMINI (V3)** con los 10 escenarios del
-  bloque anterior contra staging LIVE. ATLAS redeployará a staging
-  (no requiere migración) y notificará a GEMINI con la reapertura
-  del gate V3 con asserts específicos para Facturapi Test.
-  **Escenarios V3 adicionales del intento 2:**
-  - 11. **`items[].product` shape exacto:** Playwright intercepta
-     la request `POST /v2/invoices` y verifica que el body lleva
-     `items: [{ quantity, product: { description, product_key,
-     price, tax_included: false } }]` con `price` en pesos (NO
-     `unit_price` plano). ASSERT: NO existe `unit_price`, NO
-     existe `factor`, NO existe `base`, NO existe `amount`.
-  - 12. **`default_invoice_use` en customer:** Playwright
-     intercepta `POST /v2/customers` y verifica que el body NO
-     contiene `cfdi_use` Y contiene `default_invoice_use` con el
-     valor del cliente (G01/G03/etc).
-  - 13. **`idempotency_key` en body de invoice:** Playwright
-     intercepta `POST /v2/invoices` y verifica que el body lleva
-     `idempotency_key` (no sólo el header). Ambos coinciden
-     (`Idempotency-Key` header == `idempotency_key` body).
-  - 14. **GET `/invoices/{id}` fallback:** simular Test donde
-     `/stamp` devuelve `uuid: null`. ASSERT: el adapter hace
-     `GET /v2/invoices/{id}` y persiste el `uuid` resultante.
-  - 15. **Cero secretos en repo:** `git grep -nE "sk_(test|live)_"`
-     sobre el árbol completo devuelve 0 hits (sólo aparece en
-     fixtures de tests con valores sintéticos como
-     `sk_test_abcdef1234567890`).
+- **Redeploy + Gate final GEMINI (V3)** con los escenarios de los
+  3 intentos contra staging LIVE. ATLAS redeployará a staging (no
+  requiere migración) y notificará a GEMINI con la reapertura del
+  gate V3.
+  **Escenarios V3 intento 1 (10):** ver bloque anterior.
+  **Escenarios V3 intento 2 (5):** ver bloque anterior (`items[].product`,
+  `default_invoice_use`, `idempotency_key`, GET fallback, cero secretos).
+  **Escenarios V3 intento 3 (5):**
+  - 16. **Bypass BD en modo HTTP:** activar `PAC_MODE=http` +
+     `FACTURAPI_API_KEY` en staging. Crear OS real → cliente real →
+     borrador real → timbrar. ASSERT: la query log de BD NO contiene
+     `SELECT ... FROM organization_fiscal_config` durante timbrar;
+     sólo se ve `POST /v2/customers` + `POST /v2/invoices` etc. Si el
+     log SÍ muestra el SELECT, el bypass NO está activo.
+  - 17. **Domicilio fiscal completo en POST `/customers`:** el cliente
+     tiene domicilio completo (calle, número, colonia, municipio,
+     estado, CP, país) capturado en el dialog. ASSERT: el body de
+     `POST /v2/customers` lleva `address.street`, `address.exterior`,
+     `address.neighborhood`, `address.city`, `address.municipality`,
+     `address.zip`, `address.state`, `address.country` Y NO lleva
+     claves españolas.
+  - 18. **Rechazo pre-POST con domicilio incompleto:** forzar un
+     cliente con domicilio parcial (sólo RFC/razón/régimen, sin
+     dirección). ASSERT: el dialog bloquea el submit con
+     `createInvoiceFiscalAddressMissing` y NO se hace POST a
+     Facturapi. Verificar en Network panel.
+  - 19. **Timbrar con domicilio completo:** OS real → cliente con
+     domicilio completo → borrador → timbrar. ASSERT: timbrado
+     devuelve 200 OK, `invoices.status='emitida'`,
+     `invoices.cfdi_uuid` se persiste, NO devuelve 412.
+- 20. **Error UI visible en Timbrar:** forzar un error 412/422
+     del backend. ASSERT: Playwright captura
+     `data-testid="facturas-list-timbrar-error"` con `role="alert"`
+     y mensaje legible (no el código crudo).
+- **Live/producción:** pendiente autorización explícita de Frank +
 - **Live/producción:** pendiente autorización explícita de Frank +
   provisión de `sk_live_*` + revisión de cumplimiento fiscal + CSD
   del emisor (que Facturapi NO custodia; hay que subirlo via

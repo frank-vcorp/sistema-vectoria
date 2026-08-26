@@ -174,8 +174,26 @@ function FacturaRowActions({
   const utils = trpc.useUtils();
 
   const timbrar = trpc.facturacion.timbrar.useMutation({
-    onSuccess: () => utils.facturacion.list.invalidate(),
+    onSuccess: () => {
+      setTimbrarError(null);
+      utils.facturacion.list.invalidate();
+    },
+    onError: (err) => {
+      // IMPL-20260825-36 (intento 3) · Errores del PAC (incluidos
+      // 412/422/5xx) deben ser visibles con `role="alert"`. Sin
+      // este handler el error se queda silencioso y el usuario ve
+      // "falso éxito" porque el botón vuelve a habilitarse sin
+      // feedback. Mantenemos el mensaje estable entre intentos
+      // para que QA V3 pueda repetir el flujo.
+      const code = err.data?.code ?? null;
+      const message =
+        code === "INVOICE_FISCAL_DATA_REQUIRED"
+          ? "Domicilio fiscal incompleto. Captura calle, número, colonia, municipio, estado, CP y país antes de timbrar."
+          : err.message || "No fue posible timbrar la factura.";
+      setTimbrarError(message);
+    },
   });
+  const [timbrarError, setTimbrarError] = React.useState<string | null>(null);
 
   return (
     <div className="flex flex-wrap items-center gap-1">
@@ -189,12 +207,24 @@ function FacturaRowActions({
       {invoice.status === "borrador" ? (
         <button
           type="button"
-          onClick={() => timbrar.mutate({ invoiceId: invoice.id })}
+          onClick={() => {
+            setTimbrarError(null);
+            timbrar.mutate({ invoiceId: invoice.id });
+          }}
           disabled={timbrar.isPending}
           className="rounded-md border bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {messages.facturacion.timbrar}
         </button>
+      ) : null}
+      {timbrarError ? (
+        <p
+          role="alert"
+          className="basis-full rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive"
+          data-testid="facturas-list-timbrar-error"
+        >
+          {timbrarError}
+        </p>
       ) : null}
       {invoice.status !== "cancelada" && invoice.status !== "borrador" ? (
         <button
