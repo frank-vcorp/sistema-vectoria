@@ -2585,3 +2585,64 @@ it("409 al POST /invoices → GET recovery con match único → /stamp 2xx", asy
     expect(getRec).toBeUndefined();
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-38 · B-4 · side-effect `os.finalInvoiceIssued=true` al timbrar
+// (SPEC-004↔007↔008). Sin nueva API, sin migración.
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-38 · B-4 · timbrar marca finalInvoiceIssued en la OS", () => {
+  it("invoices.ts: tras timbrar, si la factura tiene `orderId` se actualiza `orders.finalInvoiceIssued=true`", async () => {
+    const src = await readFile(
+      "src/server/services/facturacion/invoices.ts",
+      "utf8",
+    );
+    // Bloque del side-effect tras `invoices update (timbrar)`,
+    // dentro de la misma transacción. Usamos el comentario IMPL como
+    // ancla estable para el regex (es nuestra línea de evidencia).
+    const sideEffectBlock = src.match(
+      /IMPL-20260825-38[\s\S]*?if \(updated\.orderId\)[\s\S]*?finalInvoiceIssued: true[\s\S]*?eq\(orders\.organizationId, orgId\)/,
+    );
+    expect(sideEffectBlock).not.toBeNull();
+    expect(sideEffectBlock![0]).toContain("eq(orders.id, updated.orderId)");
+  });
+  it("invoices.ts: timbrar emite audit `os.final_invoice_issued` cuando la factura tiene `orderId`", async () => {
+    const src = await readFile(
+      "src/server/services/facturacion/invoices.ts",
+      "utf8",
+    );
+    // Audit explícito del side-effect, independiente de `factura.timbrar`.
+    const auditBlock = src.match(
+      /entityId:\s*updated\.orderId[\s\S]*?action:\s*"os\.final_invoice_issued"[\s\S]*?after:\s*\{[^}]*finalInvoiceIssued:\s*true/,
+    );
+    expect(auditBlock).not.toBeNull();
+  });
+  it("invoices.ts: timbrarSystem también marca `orders.finalInvoiceIssued=true` cuando la factura tiene `orderId`", async () => {
+    const src = await readFile(
+      "src/server/services/facturacion/invoices.ts",
+      "utf8",
+    );
+    // El bloque de `timbrarSystem` debe contener la actualización
+    // idempotente del flag de la OS.
+    const systemBlock = src.match(
+      /async function timbrarSystem\([\s\S]*?return rowToDto\(updated\);[\s\S]*?\n\s*\}/,
+    );
+    expect(systemBlock).not.toBeNull();
+    expect(/finalInvoiceIssued: true/.test(systemBlock![0])).toBe(true);
+    expect(/eq\(orders\.id, updated\.orderId\)/.test(systemBlock![0])).toBe(true);
+  });
+  it("invoices.ts: side-effect es idempotente (UPDATE a `true` cuando ya lo es no rompe)", async () => {
+    const src = await readFile(
+      "src/server/services/facturacion/invoices.ts",
+      "utf8",
+    );
+    // El UPDATE no tiene un `where finalInvoiceIssued=false` (idempotencia
+    // por construcción: asignar el mismo valor es un no-op).
+    const sideEffectBlock = src.match(
+      /IMPL-20260825-38[\s\S]*?finalInvoiceIssued: true[\s\S]*?eq\(orders\.organizationId, orgId\)/,
+    );
+    expect(sideEffectBlock).not.toBeNull();
+    // No debe filtrar por estado previo (idempotencia).
+    expect(/finalInvoiceIssued:\s*false/.test(sideEffectBlock![0])).toBe(false);
+  });
+});

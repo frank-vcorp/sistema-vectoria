@@ -33,6 +33,7 @@ import { getDb, withTx } from "@/server/db/client";
 import {
   clients,
   files,
+  invoices,
   orders,
   quotes,
   scopeDocuments,
@@ -873,20 +874,32 @@ export function createOrdersService(
           );
         }
       }
-      // Saldo pendiente + factura final: mientras SPEC-007/008/009
-      // no expongan un contrato consumible, asumimos:
-      //   - `finalInvoiceIssued` = flag de la OS (sólo SPEC-007 puede
-      //     ponerlo en true vía side-effect consumible).
-      //   - `outstandingBalanceCents` = `soldTotalCents - paid`.
-      const paid = await advanceProvider.getAdvancePaidCents({
-        organizationId: user.organization_id,
-        cotizacionId: before.cotizacionId,
-        quoteClientId: before.clientId,
-        tipoCobro: before.tipoCobro as TipoCobro,
-      });
+      // Saldo pendiente + factura final: IMPL-20260825-38 · B-4 ·
+      // SPEC-004�007↔008. La fuente de saldo del cierre administrativo
+      // son las facturas del `orderId` y su `paid_cents` confirmado/
+      // persistido por SPEC-008 (cobros.confirm/revert mantiene ese
+      // campo), NO el anticipo inicial. El contrato de anticipo se
+      // conserva intacto para `authorize` (`getAdvancePaidCents`).
+      // Excluimos facturas `cancelada` porque no contribuyen al
+      // saldo del cierre (mismo patrón que `osOutstandingBalance`
+      // en finanzas). Idempotente y seguro contra sobrepago: el
+      // `Math.max(0, ...)` evita balance negativo si por alguna
+      // razón la suma de `paidCents` excediera `soldTotalCents`.
+      const invRows = await tx
+        .select({ paidCents: invoices.paidCents, status: invoices.status })
+        .from(invoices)
+        .where(
+          and(
+            eq(invoices.organizationId, user.organization_id),
+            eq(invoices.orderId, before.id),
+          ),
+        );
+      const totalPaidCents = invRows
+        .filter((r) => r.status !== "cancelada")
+        .reduce((acc, r) => acc + Math.max(0, Math.floor(r.paidCents)), 0);
       const outstandingBalanceCents = Math.max(
         0,
-        before.soldTotalCents - paid.advancePaidCents,
+        before.soldTotalCents - totalPaidCents,
       );
       const evaluation = evaluateCloseAdministrative({
         outstandingBalanceCents,

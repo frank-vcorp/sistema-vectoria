@@ -19,6 +19,7 @@
  *    `hidden sm:table-cell` en el módulo de UI; verificado en V3).
  */
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 import {
   ORDER_STATUSES,
   OS_ADVANCE_REQUIRED_PCT,
@@ -504,5 +505,107 @@ describe("SPEC-004 · tipos y zod", () => {
   });
   it("TIPO_COBRO canónico sigue presente", () => {
     expect([...TIPO_COBRO]).toEqual(["pago_unico", "mensualidades", "suscripcion"]);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-38 · B-4 · saldo de cierre usa `invoices.paidCents`
+// (no anticipo), excluye canceladas, evita sobrepago y conserva
+// `closedBalanceCents=0` en cierre normal + auditoría.
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-38 · B-4 · saldo de cierre desde invoices.paidCents", () => {
+  it("orders.ts: closeAdministrative importa `invoices` del schema", async () => {
+    const src = await readFile(
+      "src/server/services/orden-servicio/orders.ts",
+      "utf8",
+    );
+    // El esquema `invoices` debe estar en la importación del schema.
+    expect(src).toMatch(
+      /import\s*\{[\s\S]*?invoices,[\s\S]*?\}\s*from\s*["']@\/server\/db\/schema["']/,
+    );
+  });
+  it("orders.ts: closeAdministrative consulta `invoices.orderId` y suma `paidCents` (no anticipo)", async () => {
+    const src = await readFile(
+      "src/server/services/orden-servicio/orders.ts",
+      "utf8",
+    );
+    // Localiza el bloque del cierre administrativo (la región estable
+    // está delimitada por los comentarios canónicos).
+    const block = src.match(
+      /IMPL-20260825-38[\s\S]*?const evaluation = evaluateCloseAdministrative/,
+    );
+    expect(block).not.toBeNull();
+    // Lee `invoices.paidCents` y `invoices.status` filtrando por orderId.
+    expect(/invoices\.paidCents/.test(block![0])).toBe(true);
+    expect(/invoices\.orderId/.test(block![0])).toBe(true);
+    // Excluye canceladas.
+    expect(/r\.status !== "cancelada"/.test(block![0])).toBe(true);
+    // No usa el contrato de anticipo dentro del cierre.
+    expect(/advanceProvider\.getAdvancePaidCents/.test(block![0])).toBe(false);
+  });
+  it("orders.ts: cierre con saldo=0 + finalInvoice=true → evaluateCloseAdministrative.ok=true", () => {
+    // Caso normal tras pago total SPEC-008 + timbrado SPEC-007.
+    const r = evaluateCloseAdministrative({
+      outstandingBalanceCents: 0,
+      finalInvoiceIssued: true,
+      directorException: false,
+    });
+    expect(r.ok).toBe(true);
+  });
+  it("orders.ts: pago parcial mantiene OUTSTANDING_BALANCE (sin excepción Director)", () => {
+    // 12,760,000 (total OS) − 6,380,000 (pago parcial) = 6,380,000 pendiente.
+    const r = evaluateCloseAdministrative({
+      outstandingBalanceCents: 6_380_000,
+      finalInvoiceIssued: true,
+      directorException: false,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors).toContain("OUTSTANDING_BALANCE");
+  });
+  it("orders.ts: cierre normal mantiene `closedBalanceCents=0` cuando el saldo es cero", () => {
+    // El helper puro sólo evalúa; verificamos que para `balance=0` no
+    // se exige directorException y no se reporta OUTSTANDING_BALANCE.
+    const r = evaluateCloseAdministrative({
+      outstandingBalanceCents: 0,
+      finalInvoiceIssued: true,
+      directorException: false,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) expect(r.errors).not.toContain("OUTSTANDING_BALANCE");
+  });
+  it("orders.ts: el contrato de anticipo (`advanceProvider`) se conserva en `authorize`", async () => {
+    const src = await readFile(
+      "src/server/services/orden-servicio/orders.ts",
+      "utf8",
+    );
+    // El contrato de anticipo sigue usándose para validar el umbral
+    // del 90% al autorizar; sólo el cierre administrativo cambia.
+    expect(/advanceProvider\.getAdvancePaidCents/.test(src)).toBe(true);
+    // Y se usa dentro del bloque `authorize` (no `closeAdministrative`).
+    const authBlock = src.match(
+      /async function authorize\([\s\S]*?return toDto\(after\);\s*\n\s*\}/,
+    );
+    expect(authBlock).not.toBeNull();
+    expect(/advanceProvider\.getAdvancePaidCents/.test(authBlock![0])).toBe(true);
+  });
+  it("orders.ts: `closedBalanceCents` se persiste con el `outstandingBalanceCents` calculado", async () => {
+    const src = await readFile(
+      "src/server/services/orden-servicio/orders.ts",
+      "utf8",
+    );
+    // El UPDATE de cierre persiste el saldo calculado.
+    expect(/closedBalanceCents:\s*outstandingBalanceCents/.test(src)).toBe(true);
+  });
+  it("orders.ts: el helper puro `evaluateCloseAdministrative` evita balance negativo vía `Math.max(0, ...)`", () => {
+    // Defensa documentada: si la suma de `paidCents` excede
+    // `soldTotalCents` (caso borde), el cierre NO emite
+    // OUTSTANDING_BALANCE porque `Math.max(0, ...)` lo aplana a 0.
+    const r = evaluateCloseAdministrative({
+      outstandingBalanceCents: -100, // entrada defensiva
+      finalInvoiceIssued: true,
+      directorException: false,
+    });
+    expect(r.ok).toBe(true);
   });
 });

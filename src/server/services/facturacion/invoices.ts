@@ -50,6 +50,7 @@ import {
   invoiceSchedules,
   invoices,
   organizationFiscalConfig,
+  orders,
 } from "@/server/db/schema";
 import {
   CANCEL_MOTIVES_SAT,
@@ -801,6 +802,23 @@ return {
         .where(and(eq(invoices.id, row.id), eq(invoices.organizationId, orgId)))
         .returning();
       if (!updated) throw new Error("invoices update (timbrar) sin fila retornada");
+      // 4b) IMPL-20260825-38 · B-4 · side-effect a la OS en la misma
+      //     transacción: si la factura está amarrada a una OS, marca
+      //     `orders.finalInvoiceIssued=true` (BR-N393). Idempotente:
+      //     un UPDATE a `true` cuando ya lo es no es un cambio. Sólo
+      //     se ejecuta si la factura tiene `orderId` (las facturas
+      //     sin OS — p.ej. anticipos sin proyecto — quedan fuera).
+      if (updated.orderId) {
+        await tx
+          .update(orders)
+          .set({ finalInvoiceIssued: true })
+          .where(
+            and(
+              eq(orders.id, updated.orderId),
+              eq(orders.organizationId, orgId),
+            ),
+          );
+      }
       // 5) Audit (BR-N336): sin valor del CFDI XML/PDF (sólo IDs).
       await audit.record(ctx, {
         entityType: "invoice",
@@ -815,6 +833,18 @@ return {
           issuedAt: updated.issuedAt?.toISOString(),
         },
       });
+      // 5b) IMPL-20260825-38 · B-4 · audit del side-effect a la OS
+      //     (independiente de `factura.timbrar` para no acoplar
+      //     consumidores). Sólo si la factura está amarrada a una OS.
+      if (updated.orderId) {
+        await audit.record(ctx, {
+          entityType: "order",
+          entityId: updated.orderId,
+          action: "os.final_invoice_issued",
+          before: { finalInvoiceIssued: false },
+          after: { finalInvoiceIssued: true, invoiceId: updated.id },
+        });
+      }
       return rowToDto(updated);
     });
   }
@@ -1644,6 +1674,24 @@ return {
       .where(and(eq(invoices.id, row.id), eq(invoices.organizationId, orgId)))
       .returning();
     if (!updated) throw new Error("invoices update (system timbrar) sin fila");
+    // IMPL-20260825-38 · B-4 · side-effect a la OS cuando la factura
+    // timbrada por el job recurrente está amarrada a una OS. Mismo
+    // patrón que `timbrar` (idempotente, BR-N393). El job recurrente
+    // no usa `withTx` por motivos históricos (no fue migrado), pero
+    // la actualización de `orders` aquí ocurre inmediatamente después
+    // del timbrado y es idempotente: si el job reintenta, el flag ya
+    // está en `true`.
+    if (updated.orderId) {
+      await db
+        .update(orders)
+        .set({ finalInvoiceIssued: true })
+        .where(
+          and(
+            eq(orders.id, updated.orderId),
+            eq(orders.organizationId, orgId),
+          ),
+        );
+    }
     return rowToDto(updated);
   }
 
