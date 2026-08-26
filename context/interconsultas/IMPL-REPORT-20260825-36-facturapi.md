@@ -5,11 +5,11 @@ Estado: READY_FOR_VERIFYING
 SPEC: SPEC-20260817-007 (Facturación CFDI) actualizada
 ADR: ADR-20260825-01-integracion-facturapi
 Decisión: DEC-FUN-20260825-01 (Facturapi como PAC HTTP v2)
-Discovery refs: probe real `GET https://www.facturapi.io/v2/customers?limit=1` HTTP 200 con Test Secret Key; revisión oficial contra `docs.facturapi.io/api`; QA V3 staging `lista/preview` 200 OK + timbrar 412 por gate BD
+Discovery refs: probe real `GET https://www.facturapi.io/v2/customers?limit=1` HTTP 200 con Test Secret Key; revisión oficial contra `docs.facturapi.io/api`; QA V3 staging `lista/preview` 200 OK + timbrar 412 por gate BD; F-11 is_ready_to_stamp=false con `verification.errors`
 Origen handoff: ATLAS (turno continuo)
 Fecha: 2026-08-25 (turno continuo)
 Implementador: SOFIA
-Intento: 3 (IMPLEMENTATION_DEFECT dentro IMPL-20260825-36, QA V3 staging)
+Intento: 4 (IMPLEMENTATION_DEFECT dentro IMPL-20260825-36, F-11 observabilidad)
 Proveedor activo previo: FacturoPorTi (ADR-20260817-09, ahora `superseded`)
 Proveedor activo nuevo: Facturapi v2 (ADR-20260825-01)
 ---
@@ -24,6 +24,57 @@ proveedor previo (FacturoPorTi, ADR-20260817-09 ahora
 frontera `PacClient` ya existente, **sin tocar el router, el servicio
 de facturación ni el schema**. La mock se conserva intacta para
 tests y para el default local.
+
+## Delta intento 4 (F-11 · observabilidad diagnóstica)
+
+QA V3 reprodujo F-11: Facturapi Test acepta un customer con
+`tax_id=XAXX010101000 + regimen=616 + domicilio` y crea un invoice
+draft 2xx, pero `is_ready_to_stamp=false`. El adapter del intento 3
+sólo devolvía el mensaje genérico
+`"Facturapi: factura borrador no lista para timbrar (faltan datos del receptor)"`
+y descartaba `verification.errors[]`. Sin paths/codes/messages
+estructurados, el PL/Director no puede saber qué campo falta ni
+cómo corregirlo. Cuatro fixes de observabilidad (sin llamadas
+externas nuevas, sin cambio de datos/UI salvo el mensaje):
+
+**A. Nuevo helper `extractFacturapiErrors(payload)`.** Mantiene
+la respuesta completa sólo en memoria (variable local del
+flujo), lee `verification.errors[]`, top-level `errors[]` y
+`message`, y proyecta **sólo** los campos `path` / `code` /
+`message` (todos sanitizados por `sanitizeMessage`). NO incluye
+valores de campos del receptor (RFC, razón social, domicilio,
+email) — sólo nombres de campo. Limita a 5 entradas para no
+desbordar el `DomainError.message`.
+
+**B. Branch `is_ready_to_stamp === false` mejorada.** Ahora
+lanza `DomainError(INVOICE_BUILD_INVALID)` con
+`formatDiagnostics(header, lines)`. Ejemplo de mensaje:
+```
+Facturapi: factura borrador no lista para timbrar
+  · [customer.address.zip] required Zip code is required
+  · [customer.address.municipality] required Municipality is required
+```
+
+**C. `throwFacturapiHttpError` 409/422 mejorada.** Aplica el
+mismo `extractFacturapiErrors` al body del response 4xx. Si
+Facturapi rechaza con 422 antes de devolver un draft, los paths
+también se proyectan al `DomainError`. Sin `errors[]`, fallback
+al `message` top-level.
+
+**D. Seguridad (sin secretos ni PII).** `sanitizeMessage` aplica
+dos filtros: enmascara `sk_test_*`/`sk_live_*` (defensa contra
+keys que aparezcan accidentalmente en `message`) y trunca
+`path` a 80 chars y `message` a 200 chars (defensa contra body
+crudo inflado). NO se loguea ni se persiste el body completo:
+sólo las líneas proyectadas viven en el `DomainError.message`
+que tRPC expone al cliente.
+
+**Por qué NO es SPEC-GAP.** Es diagnóstico de UI/backend, NO
+cambio funcional: el comportamiento es el mismo (el draft NO se
+timbra cuando `is_ready_to_stamp=false`). Sólo mejora el
+feedback al PL/Director para corregir el cliente. Cumple
+ADR-03 §3.5 (no loguear secretos) y la regla del handoff
+"Conservar la respuesta completa sólo en memoria".
 
 ## Delta intento 3 (QA V3 staging: 412 en timbrar + domicilio fiscal)
 
@@ -184,14 +235,14 @@ Decisiones operativas (cumple ADR-20260825-01):
 
 | Archivo | Cambio |
 |---|---|
-| `src/server/integrations/pac/facturapi.ts` | **Nuevo**. `createPacHttpClient(opts)` implementa `PacClient` con fetch estándar. Métodos: `stamp` (POST /customers con `Idempotency-Key` header y body documentado `legal_name/tax_id/tax_system/email/address/default_invoice_use` → POST /invoices con `status=draft`, `external_id`, `idempotency_key` y `items[].product={description, product_key, price, tax_included:false}` → check `is_ready_to_stamp` → POST /invoices/{id}/stamp → **GET /invoices/{id} fallback si `uuid` falta** → GET /invoices/{id}/xml + /pdf como Buffer) y `cancel` (POST /invoices/{uuid}/cancel con `{motivo}`). **Mapeo domicilio interno (`calle/numero/...`) → Facturapi (`street/exterior/...`) en `mapDomicilioToFacturapi` con validación pre-POST (`INVOICE_FISCAL_DATA_REQUIRED` si falta algún campo)**. Mapeo de errores 401/403/404/409/422/429/5xx a `DomainError`/`PacTransientError`. Timeout 15s default. `sanitizeMessage` enmascara `sk_test_*`/`sk_live_*`. Logger seguro a `process.stderr` (nunca `stdout`). |
+| `src/server/integrations/pac/facturapi.ts` | **Nuevo**. `createPacHttpClient(opts)` implementa `PacClient` con fetch estándar. Métodos: `stamp` (POST /customers con `Idempotency-Key` header y body documentado `legal_name/tax_id/tax_system/email/address/default_invoice_use` → POST /invoices con `status=draft`, `external_id`, `idempotency_key` y `items[].product={description, product_key, price, tax_included:false}` → check `is_ready_to_stamp` → POST /invoices/{id}/stamp → **GET /invoices/{id} fallback si `uuid` falta** → GET /invoices/{id}/xml + /pdf como Buffer) y `cancel` (POST /invoices/{uuid}/cancel con `{motivo}`). **Mapeo domicilio interno (`calle/numero/...`) → Facturapi (`street/exterior/...`) en `mapDomicilioToFacturapi` con validación pre-POST (`INVOICE_FISCAL_DATA_REQUIRED` si falta algún campo)**. **(intento 4)** Nuevo helper `extractFacturapiErrors(payload)` que proyecta `verification.errors[]` y `errors[]` en líneas `[path] code message`, sin PII ni secretos. Aplicado en branch `is_ready_to_stamp === false` y en `throwFacturapiHttpError` (409/422). Mapeo de errores 401/403/404/409/422/429/5xx a `DomainError`/`PacTransientError`. Timeout 15s default. `sanitizeMessage` enmascara `sk_test_*`/`sk_live_*`. Logger seguro a `process.stderr` (nunca `stdout`). |
 | `src/server/integrations/pac/index.ts` | `createPacClient(opts?)` ahora dispatcha por `mode` o env (`PAC_MODE=http` + `FACTURAPI_API_KEY` → HTTP, sino mock). Re-exporta `createPacHttpClient` y `FacturapiHttpClientOptions`. `createPacMockClient` y los códigos canónicos (`PAC_API_KEY_MISSING`, `CSD_NOT_CONFIGURED`, `INVALID_CANCEL_MOTIVE`) intactos. |
 | `src/server/services/facturacion/invoices.ts` | (intento 1/2) `descifrarCredencialesPac`: el guard de CSD se aplica sólo si `PAC_MODE !== "http"`. **(intento 3)** Nueva función `obtenerCredencialesTimbrar(orgId)` que bypassa BD en modo HTTP (early-return con credenciales vacías; el secreto efectivo vive en `FACTURAPI_API_KEY` del closure de `createPacHttpClient`). `timbrar` y `cancel` llaman a `obtenerCredencialesTimbrar` en lugar de `descifrarCredencialesPac`. Para mock y otros PAC CSD-based, el comportamiento sigue siendo el del intento 1/2. El descifrado de `csd_password_ciphertext` es tolerante a `null`; los `Buffer.from([...])` del CSD se sustituyen por `Buffer.alloc(0)` cuando `csdCerBucketKey`/`csdPemBucketKey` faltan. La interfaz `PacStampInput` (`csdCer: Buffer`) sigue recibiendo bytes no-nulos (vacíos válidos para Facturapi). |
 | `src/server/trpc/routers/facturacion.ts` | `buildService()` llama `createPacClient()` sin args (auto-detecta por env). El router NO lee env directamente (delegado al factory en capa infra). |
 | `src/modules/orden-servicio/orden-detail.tsx` | (intento 3) `CreateInvoiceDraftDialog` añade campos `calle/numero/colonia/municipio/estado/cp/pais` pre-rellenados desde `clientes.fiscal.getForClient`. El handler `onSubmit` los envía a `clientes.fiscal.upsert({...domicilio:{...}})` antes de `buildFromOrder`. Validación cliente exige los 7 campos no-vacíos; mensaje canónico `createInvoiceFiscalAddressMissing`. |
 | `src/modules/facturacion/facturas-list.tsx` | (intento 3) La mutación `timbrar` añade `onError(err)` que mapea `INVOICE_FISCAL_DATA_REQUIRED` a mensaje amigable. Estado local `timbrarError` se renderiza con `<p role="alert" aria-live="assertive" data-testid="facturas-list-timbrar-error">` debajo de los botones. |
 | `src/shared/utils/messages.ts` | (intento 3) Nueva clave `createInvoiceFiscalAddressMissing` para el error de domicilio fiscal incompleto. |
-| `tests/spec-20260817-007.test.ts` | (intento 1) **+18 tests** (AC-1 Facturapi + AC-2 dispatch).<br/>(intento 2) **+5 tests** (AC-3 contrato documentado): shape `items[].product={description, product_key, price, tax_included}` con `price` en pesos y SIN campos inventados (`unit_price`, `factor`, `base`, `amount`); `default_invoice_use` en customer body sin `external_id`; `idempotency_key` + `external_id` en invoice body; GET `/invoices/{id}` fallback cuando `/stamp` no devuelve `uuid`; degradación controlada a `id` cuando ambos endpoints carecen de `uuid`.<br/>(intento 3) **+6 tests** (AC-4 bypass HTTP + domicilio + error UI): mapeo domicilio `calle/numero/...` → `street/exterior/...` con rechazo de claves españolas; rechazo `INVOICE_FISCAL_DATA_REQUIRED` cuando domicilio ausente o incompleto (sin HTTP); `facturas-list.tsx` tiene `onError` + `role="alert"` + `data-testid="facturas-list-timbrar-error"`; `orden-detail.tsx` expone los 7 inputs de domicilio y los envía a `fiscalUpsert.mutate({domicilio: {...}})`; `invoices.ts` define `obtenerCredencialesTimbrar` con `PAC_MODE=http` y `timbrar`/`cancel` ya NO usan `descifrarCredencialesPac` directamente.<br/>**Total: 29 tests** específicos de Facturapi. |
+| `tests/spec-20260817-007.test.ts` | (intento 1) **+18 tests** (AC-1 Facturapi + AC-2 dispatch).<br/>(intento 2) **+5 tests** (AC-3 contrato documentado): shape `items[].product={description, product_key, price, tax_included}` con `price` en pesos y SIN campos inventados (`unit_price`, `factor`, `base`, `amount`); `default_invoice_use` en customer body sin `external_id`; `idempotency_key` + `external_id` en invoice body; GET `/invoices/{id}` fallback cuando `/stamp` no devuelve `uuid`; degradación controlada a `id` cuando ambos endpoints carecen de `uuid`.<br/>(intento 3) **+6 tests** (AC-4 bypass HTTP + domicilio + error UI): mapeo domicilio `calle/numero/...` → `street/exterior/...` con rechazo de claves españolas; rechazo `INVOICE_FISCAL_DATA_REQUIRED` cuando domicilio ausente o incompleto (sin HTTP); `facturas-list.tsx` tiene `onError` + `role="alert"` + `data-testid="facturas-list-timbrar-error"`; `orden-detail.tsx` expone los 7 inputs de domicilio y los envía a `fiscalUpsert.mutate({domicilio: {...}})`; `invoices.ts` define `obtenerCredencialesTimbrar` con `PAC_MODE=http` y `timbrar`/`cancel` ya NO usan `descifrarCredencialesPac` directamente.<br/>(intento 4) **+7 tests** (AC-5 diagnóstico `is_ready_to_stamp=false` y errores 4xx): mensaje incluye `path`/`code`/`message`; `sk_test_*` enmascarado en body aunque aparezca accidentalmente; fallback a `message` top-level cuando NO hay `verification.errors[]`; 422 con `errors[]` top-level también proyectado; PII safety (RFC/domicilio NO aparecen en el mensaje); límite de 5 entradas para no desbordar `DomainError.message`.<br/>**Total: 36 tests** específicos de Facturapi. |
 
 **Sin cambios en:** schema (`organization_fiscal_config`,
 `invoices`), `pac.ts`/router de tRPC, permisos `gestionar_facturacion`
@@ -201,11 +252,12 @@ existentes), `package.json` (sin deps nuevas).
 ## Validación
 
 - **typecheck (`pnpm typecheck`)**: **PASS** (sin output, exit 0).
-- **tests (V2 completa, `pnpm test`)**: **973/973 PASS** en 32
-  ficheros · 8.84 s
-  - `tests/spec-20260817-007.test.ts`: **80/80** (51 originales +
-    **29 nuevos** Facturapi: 18 intento 1 + 5 intento 2 AC-3 + 6
-    intento 3 AC-4 bypass/domicilio/UI).
+- **tests (V2 completa, `pnpm test`)**: **980/980 PASS** en 32
+  ficheros · 8.60 s
+  - `tests/spec-20260817-007.test.ts`: **87/87** (51 originales +
+    **36 nuevos** Facturapi: 18 intento 1 + 5 intento 2 AC-3 +
+    6 intento 3 AC-4 bypass/domicilio/UI + 7 intento 4 AC-5
+    diagnóstico F-11).
     contrato documentado).
   - `tests/impl-20260825-34.test.ts` (intento 3): **65/65** (sin
     regresión).
@@ -225,6 +277,41 @@ existentes), `package.json` (sin deps nuevas).
   end-to-end con `POST /invoices` + `POST /invoices/{id}/stamp` +
   GET `/invoices/{id}` fallback + descargas queda pendiente al gate
   V3 (GEMINI con Playwright).
+
+## Decisiones internas reversibles (intento 4)
+
+- **Respuesta completa sólo en memoria, NO persistida:** la
+  variable `draft` (full Facturapi response) vive en el stack
+  durante la llamada a `stamp`. Después del throw de
+  `DomainError` se libera. NO se loguea ni se persiste en BD.
+  Cumple ADR-03 §3.5 (secretos) y la regla del handoff
+  "Conserva la respuesta completa sólo en memoria".
+
+- **Proyección sin PII:** el helper `extractFacturapiErrors`
+  sólo emite `path` (nombre del campo), `code` (categoría) y un
+  resumen corto de `message`. NO incluye valores (`tax_id`,
+  `legal_name`, `address.*`, `email`). Si el path excede 80
+  chars o el message excede 200 chars, se truncan con `...`.
+  Tests AC-5 verifican explícitamente que `XAXX010101000`,
+  `Blvd. Atardecer` y `Huatabampo` NO aparecen en el mensaje.
+
+- **Sanitización de secretos:** `sanitizeMessage` se aplica por
+  ELEMENTO (path, code, message) antes de concatenar al
+  `DomainError.message`. Tests AC-5 verifican que un `sk_test_*`
+  inyectado accidentalmente en el body se enmascara como
+  `MASKED` (defensa contra keys que aparezcan en `message`).
+
+- **Límite de 5 entradas:** `extractFacturapiErrors` retorna
+  como máximo 5 líneas proyectadas para no desbordar el
+  `DomainError.message`. Si Facturapi devuelve 12 errores, los
+  primeros 5 (típicamente los más relevantes: required/invalid)
+  son los que el PL ve. Tests AC-5 verifican el límite.
+
+- **NO se reescribe el cliente ni se agrega `errorLog`:** el
+  scope es exclusivamente observabilidad. Si ATLAS quiere
+  persistir los diagnósticos en `audit_logs` o en un nuevo
+  `pac_error_logs`, queda para un incremento posterior. Aquí
+  sólo mejora el mensaje al cliente tRPC.
 
 ## Decisiones internas reversibles (intento 3)
 
@@ -345,6 +432,25 @@ existentes), `package.json` (sin deps nuevas).
 | AC-10 · Tests dirigidos con fetch mock para auth, payload, stamp, descargas, errores y ausencia de CSD; NO llama a Facturapi | `makeFetchMock(responses[])` retorna `fetchImpl` inyectable; captura `url/method/headers/body`. 18 tests deterministas con `vi.stubGlobal` o `fetchImpl`. Cero DNS real | Cobertura arriba por AC; inspección: ningún test hace `fetch(url)` sin mock |
 | AC-11 · Actualizar IMPL-REPORT con evidencia y riesgos | Este documento | n/a |
 | AC-12 · typecheck, tests dirigidos, suite V2 y lint propio; READY_FOR_VERIFYING | typecheck PASS; suite V2 962/962; lint 0 nuevos | Bloque "Validación" arriba |
+
+## Riesgos y desviaciones (intento 4)
+
+- **Riesgo muy bajo (sólo observabilidad):** cambio aditivo de
+  un helper (`extractFacturapiErrors`) + una llamada a
+  `formatDiagnostics` en dos sitios (`is_ready_to_stamp=false`
+  branch + `throwFacturapiHttpError` 409/422). NO modifica el
+  comportamiento de timbrado: el draft NO se timbra cuando
+  `is_ready_to_stamp=false`, igual que antes; sólo cambia el
+  mensaje del `DomainError` que el cliente ve.
+
+- **PII: doble defensa.** (a) Sólo se emiten `path/code/message`
+  (no valores). (b) `sanitizeMessage` enmascara `sk_test_*` /
+  `sk_live_*`. Tests AC-5 verifican explícitamente que el RFC y
+  domicilio del snapshot NO aparecen en el mensaje.
+
+- **Tamaño de mensaje:** limitado a 800 chars totales (cabecera +
+  5 líneas × ~150 chars cada una). Compatible con UI, logs y
+  audit sin truncar.
 
 ## Riesgos y desviaciones (intento 3)
 
@@ -486,6 +592,21 @@ siguen funcionando idénticos).
      del backend. ASSERT: Playwright captura
      `data-testid="facturas-list-timbrar-error"` con `role="alert"`
      y mensaje legible (no el código crudo).
+  **Escenarios V3 intento 4 (3):**
+  - 21. **`is_ready_to_stamp=false` con `verification.errors`:** el
+     PL/Director intenta timbrar con un cliente que tiene domicilio
+     parcial (ej: zip vacío). ASSERT: el `DomainError(INVOICE_BUILD_INVALID)`
+     expone al menos un path (`customer.address.zip`), el code
+     (`required`) y el mensaje ("Zip code is required"); NO expone
+     RFC, NO expone domicilio literal, NO expone `sk_test_*`.
+  - 22. **422 con `errors[]` top-level:** forzar un POST
+     `/v2/customers` rechazado por 422 (ej: tax_id duplicado).
+     ASSERT: el `DomainError(INVOICE_BUILD_INVALID)` muestra
+     `Facturapi 422` + path + code + message.
+  - 23. **`sk_test_*` enmascarado en error message:** inyectar un
+     body de error con `sk_test_supersecret...` accidentalmente.
+     ASSERT: el `DomainError.message` contiene `MASKED`, NO
+     contiene la clave original.
 - **Live/producción:** pendiente autorización explícita de Frank +
 - **Live/producción:** pendiente autorización explícita de Frank +
   provisión de `sk_live_*` + revisión de cumplimiento fiscal + CSD

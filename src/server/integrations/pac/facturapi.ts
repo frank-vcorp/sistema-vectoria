@@ -348,11 +348,16 @@ export function createPacHttpClient(
     });
     // Facturapi: si `is_ready_to_stamp === false`, faltan datos del
     // receptor (dirección, CP, etc). Tratamos eso como
-    // `INVOICE_BUILD_INVALID`.
+    // `INVOICE_BUILD_INVALID` y extraemos diagnósticos estructurados
+    // (paths/codes/messages) sin filtrar PII ni secretos (intento 4).
     if (draft.is_ready_to_stamp === false) {
+      const lines = extractFacturapiErrors(draft);
       throw new DomainError(
         "INVOICE_BUILD_INVALID",
-        "Facturapi: factura borrador no lista para timbrar (faltan datos del receptor)",
+        formatDiagnostics(
+          "Facturapi: factura borrador no lista para timbrar",
+          lines,
+        ),
         400,
       );
     }
@@ -527,18 +532,22 @@ async function throwFacturapiHttpError(
         `Facturapi 404 en ${method} ${path}: ${safeMsg}`,
         404,
       );
-    case 409:
+    case 409: {
+      const diag = extractFacturapiErrors(parsed);
       throw new DomainError(
         "INVOICE_BUILD_INVALID",
-        `Facturapi 409 en ${method} ${path}: ${safeMsg}`,
+        formatDiagnostics(`Facturapi 409 en ${method} ${path}`, diag.length > 0 ? diag : [safeMsg]),
         409,
       );
-    case 422:
+    }
+    case 422: {
+      const diag = extractFacturapiErrors(parsed);
       throw new DomainError(
         "INVOICE_BUILD_INVALID",
-        `Facturapi 422 en ${method} ${path}: ${safeMsg}`,
+        formatDiagnostics(`Facturapi 422 en ${method} ${path}`, diag.length > 0 ? diag : [safeMsg]),
         400,
       );
+    }
     case 429:
       throw new PacTransientError(
         `Facturapi 429 rate limit en ${method} ${path}: ${safeMsg}`,
@@ -564,6 +573,81 @@ function sanitizeMessage(raw: string): string {
   return raw
     .replace(/sk_(?:test|live)_[A-Za-z0-9_-]+/g, "sk_***MASKED***")
     .slice(0, 500);
+}
+
+/**
+ * IMPL-20260825-36 (intento 4 · QA V3 F-11) · Extrae diagnósticos
+ * estructurados de un response de Facturapi. NO incluye el body
+ * crudo, NO incluye valores de campos del receptor (RFC, razón
+ * social, domicilio) ni tokens: sólo `path` (nombre del campo), `code`
+ * (categoría de error) y un resumen corto de `message`. Aplica
+ * `sanitizeMessage` por elemento para enmascarar cualquier `sk_*`
+ * accidental.
+ *
+ * Facturapi expone errores en dos formas:
+ *  - `verification.errors[].{path, code, message}` cuando el draft
+ *    se crea OK pero `is_ready_to_stamp=false`.
+ *  - Top-level `errors[].{path, code, message}` cuando Facturapi
+ *    rechaza el POST con 4xx (422/409).
+ *  - Top-level `message` como fallback general.
+ */
+function extractFacturapiErrors(payload: unknown): string[] {
+  const lines: string[] = [];
+  if (!payload || typeof payload !== "object") return lines;
+  const obj = payload as Record<string, unknown>;
+  const verification = obj.verification as Record<string, unknown> | undefined;
+  const errorsTop = obj.errors;
+  const errorsVerify = verification?.errors;
+  const collect = (arr: unknown) => {
+    if (!Array.isArray(arr)) return;
+    for (const item of arr) {
+      if (!item || typeof item !== "object") continue;
+      const e = item as Record<string, unknown>;
+      const rawPath = readStr(e.path);
+      const rawCode = readStr(e.code);
+      const rawMsg = readStr(e.message);
+      const path = sanitizeMessage(rawPath);
+      const code = sanitizeMessage(rawCode);
+      const msg = sanitizeMessage(rawMsg);
+      // Defensa PII: limitamos `path` a una longitud razonable
+      // (los nombres de campo de Facturapi son cortos: `customer.address.zip`).
+      // Si excede, lo truncamos. NO incluimos valores de campos.
+      const safePath = path.length > 80 ? `${path.slice(0, 77)}...` : path;
+      const safeMsg = msg.length > 200 ? `${msg.slice(0, 197)}...` : msg;
+      const parts: string[] = [];
+      if (safePath) parts.push(`[${safePath}]`);
+      if (code) parts.push(code);
+      if (safeMsg) parts.push(safeMsg);
+      if (parts.length > 0) lines.push(parts.join(" "));
+    }
+  };
+  collect(errorsVerify);
+  collect(errorsTop);
+  const topMsg = readStr(obj.message);
+  if (lines.length === 0 && topMsg) {
+    lines.push(sanitizeMessage(topMsg));
+  }
+  // Limitar a 5 entradas para no desbordar el `DomainError.message`.
+  return lines.slice(0, 5);
+}
+
+function readStr(v: unknown): string {
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return "";
+}
+
+/**
+ * IMPL-20260825-36 (intento 4) · Formatea un set de líneas de
+ * diagnóstico en un mensaje de `DomainError`. La cabecera incluye
+ * contexto (status o `is_ready_to_stamp=false`); las líneas se
+ * anexan como lista con prefijo `·`.
+ */
+function formatDiagnostics(header: string, lines: string[]): string {
+  const cleaned = lines.filter((l) => l && l.length > 0).slice(0, 5);
+  if (cleaned.length === 0) return header;
+  const body = cleaned.map((l) => `  · ${l}`).join("\n");
+  return `${header}\n${body}`.slice(0, 800);
 }
 
 function serializeAcuse(acuse: Record<string, unknown>): Buffer | null {
