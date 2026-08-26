@@ -228,14 +228,21 @@ describe("IMPL-20260825-34 · AC-2 · handler usa UUID real + soldTotalCents, si
     // IMPL-20260825-34 (intento 2) · Anti doble-IVA. `o.soldTotalCents`
     // es el total bruto post-IVA; pasarlo como `valorUnitarioCents`
     // provocaría que `buildCfdiConcept` añadiera un segundo 16%.
-    // Por eso la UI consulta `comercial.cotizaciones.byId({ id: o.cotizacionId })`
-    // y usa `quote.subtotalCents` (neto) como valor unitario. Si la
+    // Por eso la UI consulta `comercial.cotizaciones.byId` y usa
+    // `quote.subtotalCents` (neto) como valor unitario. Si la
     // cotización no expone `subtotalCents`, se hace fallback a
     // `soldTotalCents` con warning visible (no silencioso).
+    //
+    // IMPL-20260825-34 (intento 3) · El input del hook es SEGURO:
+    // `detail.data?.cotizacionId ?? ""` con `enabled` condicionado a
+    // `!!detail.data`. NO se inventa un UUID ni se consulta con
+    // `undefined`. Verificamos tanto la presencia del hook como el
+    // patrón de acceso seguro a `detail.data`.
     expect(
-      /trpc\.comercial\.cotizaciones\.byId\.useQuery\(\s*\{\s*id:\s*o\.cotizacionId\s*\}/.test(
-        detailCode,
-      ),
+      /trpc\.comercial\.cotizaciones\.byId\.useQuery/.test(detailCode),
+    ).toBe(true);
+    expect(
+      /detail\.data\?\.cotizacionId\s*\?\?\s*["']["']/.test(detailCode),
     ).toBe(true);
     // Subtotal neto explícitamente preferido sobre el total bruto.
     expect(/quoteQuery\.data\?\.subtotalCents/.test(detail)).toBe(true);
@@ -963,6 +970,102 @@ describe("IMPL-20260825-34 · AC-15 · mensajes `createInvoiceFiscal*` y `create
     ]) {
       expect(new RegExp(`${key}:`).test(messages)).toBe(true);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-16 (intento 3 · fix React #310) · Hooks antes de early-return
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-34 · AC-16 · hooks nuevos antes de early-return (Rules of Hooks)", () => {
+  it("los hooks `quoteQuery`, `fiscalQuery` y `fiscalUpsert` están ANTES del primer `return` condicional", () => {
+    // QA staging confirmó React #310: los hooks del intento 2 se
+    // declaraban después de `if (detail.isLoading) return ...`,
+    // violando Rules of Hooks y colapsando todo el detalle de OS.
+    // Verificamos que los tres hooks estén declarados antes del
+    // PRIMER early-return del cuerpo del componente.
+    //
+    // Localizamos el primer `return` del cuerpo (debe estar después
+    // de los hooks; nunca antes).
+    const fnStart = detailCode.indexOf("export function OrdenDetail");
+    expect(fnStart).toBeGreaterThan(0);
+    const fnTail = detailCode.slice(fnStart);
+    // Buscamos el primer `return` que no esté dentro de un hook
+    // (mutación `useMutation({ onSuccess: () => ... })`) ni en un
+    // callback. Estrategia: encontramos el primer `return` cuyo
+    // contexto JSX empieza con `<Card>` o `<div>` (los returns del
+    // componente); los returns dentro de `onSuccess:` son callbacks.
+    const firstJsxReturn = fnTail.search(/\)\s*=>\s*\{[\s\S]{0,200}return\s*\(\s*<(?:Card|div)/);
+    // Si no encuentra por regex global, usamos el primer `return (` en el cuerpo principal:
+    const firstReturnPos =
+      firstJsxReturn >= 0
+        ? firstJsxReturn
+        : fnTail.indexOf("return (\n      <Card>\n        <CardHeader>\n          <CardTitle>");
+    expect(firstReturnPos).toBeGreaterThan(0);
+    const beforeReturn = fnTail.slice(0, firstReturnPos);
+    // Los tres hooks deben estar declarados ANTES del primer return
+    // condicional.
+    for (const hook of [
+      "trpc.comercial.cotizaciones.byId.useQuery",
+      "trpc.clientes.fiscal.getForClient.useQuery",
+      "trpc.clientes.fiscal.upsert.useMutation",
+    ]) {
+      const idx = beforeReturn.indexOf(hook);
+      expect(idx).toBeGreaterThan(0);
+    }
+    // Y NO se redeclaran después del return.
+    const afterReturn = fnTail.slice(firstReturnPos);
+    for (const hook of [
+      "cotizaciones.byId.useQuery",
+      "fiscal.getForClient.useQuery",
+      "fiscal.upsert.useMutation",
+    ]) {
+      expect(afterReturn.includes(hook)).toBe(false);
+    }
+  });
+
+  it("los hooks usan inputs SEGUROS (`detail.data?.x ?? \"\"`) y `enabled` condicionado a `!!detail.data`", () => {
+    // No se inventa un UUID ni se consulta con `undefined` durante
+    // el primer render (cuando `detail.data` aún no existe).
+    const hookStart = detailCode.indexOf("cotizaciones.byId.useQuery");
+    expect(hookStart).toBeGreaterThan(0);
+    const hookWindow = detailCode.slice(hookStart, hookStart + 400);
+    expect(/detail\.data\?\.cotizacionId\s*\?\?\s*["']["']/.test(hookWindow)).toBe(
+      true,
+    );
+    expect(/enabled:\s*\n?\s*!!detail\.data\s*&&/.test(hookWindow)).toBe(true);
+    // Y para fiscalQuery, mismo patrón con `clientId`.
+    const fiscalStart = detailCode.indexOf("fiscal.getForClient.useQuery");
+    expect(fiscalStart).toBeGreaterThan(0);
+    const fiscalWindow = detailCode.slice(fiscalStart, fiscalStart + 400);
+    expect(/detail\.data\?\.clientId\s*\?\?\s*["']["']/.test(fiscalWindow)).toBe(
+      true,
+    );
+    expect(/enabled:\s*\n?\s*!!detail\.data\s*&&/.test(fiscalWindow)).toBe(true);
+  });
+
+  it("`fiscalUpsert.onSuccess` accede `clientId` de forma segura (no inventado)", () => {
+    const onSuccessStart = detailCode.indexOf("fiscal.upsert.useMutation");
+    expect(onSuccessStart).toBeGreaterThan(0);
+    const window = detailCode.slice(onSuccessStart, onSuccessStart + 500);
+    expect(/detail\.data\?\.clientId/.test(window)).toBe(true);
+    // No se hace `invalidate` si `clientId` es falsy.
+    expect(/if\s*\(\s*clientId\s*\)/.test(window)).toBe(true);
+  });
+
+  it("el `invoiceUnitPriceCents` se deriva con `detail.data` seguro (no rompe sin datos)", () => {
+    // Si la OS está cargando, `o.soldTotalCents` no existe; el
+    // helper debe tolerar `undefined` y devolver un valor por
+    // defecto (no lanzar).
+    const helperStart = detailCode.indexOf("invoiceUnitPriceCents = (() =>");
+    expect(helperStart).toBeGreaterThan(0);
+    const window = detailCode.slice(helperStart, helperStart + 400);
+    expect(/typeof\s+o\.soldTotalCents\s*===\s*["']number["']/.test(window)).toBe(
+      true,
+    );
+    expect(/return\s*\{\s*value:\s*0,\s*source:\s*["']unknown["']/.test(window)).toBe(
+      true,
+    );
   });
 });
 

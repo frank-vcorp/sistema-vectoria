@@ -56,6 +56,47 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
   const utils = trpc.useUtils();
   const detail = trpc.ordenServicio.byId.useQuery({ orderId: id });
   const preflight = trpc.ordenServicio.preflightAuthorize.useQuery({ orderId: id });
+  // IMPL-20260825-34 (intento 3 · fix React #310) · Los hooks de
+  // IMPL-20260825-34 intento 2 (`quoteQuery`, `fiscalQuery`,
+  // `fiscalUpsert`) se declaraban DESPUÉS de los early-returns de
+  // carga/error (`if (detail.isLoading) return ...; if (detail.error
+  // || !detail.data) return ...`), violando Rules of Hooks y
+  // colapsando todo el detalle OS (QA staging). Se reordenan para
+  // existir en TODOS los renders. Los inputs usan placeholders
+  // seguros (`detail.data?.cotizacionId ?? ""`) y la consulta se
+  // activa sólo cuando `detail.data` está disponible y la OS está
+  // en `delivered` o `closed` (`enabled` flag), de modo que no se
+  // inventen IDs ni se consulte con `undefined`. La mutación no
+  // depende de los datos para declararse.
+  const quoteQuery = trpc.comercial.cotizaciones.byId.useQuery(
+    { id: detail.data?.cotizacionId ?? "" },
+    {
+      enabled:
+        !!detail.data &&
+        (detail.data.status === "delivered" ||
+          detail.data.status === "closed"),
+    },
+  );
+  const fiscalQuery = trpc.clientes.fiscal.getForClient.useQuery(
+    { clientId: detail.data?.clientId ?? "" },
+    {
+      enabled:
+        !!detail.data &&
+        (detail.data.status === "delivered" ||
+          detail.data.status === "closed"),
+    },
+  );
+  const fiscalUpsert = trpc.clientes.fiscal.upsert.useMutation({
+    onSuccess: () => {
+      // `clientId` puede no existir todavía durante el primer render
+      // (detail todavía cargando); la invalidación se hace sólo si
+      // hay datos. NO inventa IDs.
+      const clientId = detail.data?.clientId;
+      if (clientId) {
+        utils.clientes.fiscal.getForClient.invalidate({ clientId });
+      }
+    },
+  });
   const authorize = trpc.ordenServicio.authorize.useMutation({
     onSuccess: () => {
       utils.ordenServicio.byId.invalidate({ orderId: id });
@@ -347,22 +388,13 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
   // la línea inicial del CFDI sin doble IVA. La consulta de fiscal
   // pre-rellena el formulario (RFC, razón social, régimen) para que
   // el usuario sólo confirme o ajuste.
-  const quoteQuery = trpc.comercial.cotizaciones.byId.useQuery(
-    { id: o.cotizacionId },
-    { enabled: o.status === "delivered" || o.status === "closed" },
-  );
-  const fiscalQuery = trpc.clientes.fiscal.getForClient.useQuery(
-    { clientId: o.clientId },
-    { enabled: o.status === "delivered" || o.status === "closed" },
-  );
-  const fiscalUpsert = trpc.clientes.fiscal.upsert.useMutation({
-    onSuccess: () => {
-      // Invalida `getForClient` para que el siguiente intento pre-rellene
-      // con los datos persistidos. NO toca `buildFromOrder` aún: el
-      // padre orquesta la cadena upsert→build.
-      utils.clientes.fiscal.getForClient.invalidate({ clientId: o.clientId });
-    },
-  });
+  //
+  // IMPL-20260825-34 (intento 3 · fix React #310) · Los hooks
+  // `quoteQuery`, `fiscalQuery` y `fiscalUpsert` están HOISTED
+  // arriba del componente (justo después de `preflight`); aquí ya
+  // no se redeclaran. Sólo se deriva `invoiceUnitPriceCents` con
+  // acceso seguro a `detail.data` (puede ser undefined durante el
+  // primer render).
   // Subtotal neto del CFDI: preferir `quote.subtotalCents` (neto,
   // pre-IVA). Si la cotización aún no está disponible o no tiene
   // `subtotalCents`, hacemos fallback a `o.soldTotalCents` (total
