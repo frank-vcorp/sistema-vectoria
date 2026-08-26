@@ -556,6 +556,7 @@ describe("SPEC-006 · AC-7 · change requests con/sin costo", () => {
 describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
   it("validateCloseTechnicalGates: vacío (no tasks, no reqs, no tests, no delivs, no CRs) → ok", () => {
     const r = validateCloseTechnicalGates({
+      modules: [],
       tasks: [],
       requirements: [],
       tests: [],
@@ -566,6 +567,7 @@ describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
   });
   it("validateCloseTechnicalGates: tarea abierta → 409 con razón", () => {
     const r = validateCloseTechnicalGates({
+      modules: [],
       tasks: [{ status: "in_progress", weight: 1 }],
       requirements: [],
       tests: [],
@@ -580,6 +582,7 @@ describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
   });
   it("validateCloseTechnicalGates: req obligatorio no validado → 409", () => {
     const r = validateCloseTechnicalGates({
+      modules: [],
       tasks: [],
       requirements: [{ status: "approved", required: true }],
       tests: [],
@@ -590,6 +593,7 @@ describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
   });
   it("validateCloseTechnicalGates: prueba bloqueante fallida → 409", () => {
     const r = validateCloseTechnicalGates({
+      modules: [],
       tasks: [],
       requirements: [],
       tests: [
@@ -607,6 +611,7 @@ describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
   });
   it("validateCloseTechnicalGates: prueba bloqueante pasada → ok", () => {
     const r = validateCloseTechnicalGates({
+      modules: [],
       tasks: [],
       requirements: [],
       tests: [
@@ -624,6 +629,7 @@ describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
   });
   it("validateCloseTechnicalGates: prueba performance pending NO bloquea (warning)", () => {
     const r = validateCloseTechnicalGates({
+      modules: [],
       tasks: [],
       requirements: [],
       tests: [
@@ -641,6 +647,7 @@ describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
   });
   it("validateCloseTechnicalGates: entregable obligatorio delivered (sin aceptar) → 409", () => {
     const r = validateCloseTechnicalGates({
+      modules: [],
       tasks: [],
       requirements: [],
       tests: [],
@@ -651,6 +658,7 @@ describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
   });
   it("validateCloseTechnicalGates: CR abierto → 409", () => {
     const r = validateCloseTechnicalGates({
+      modules: [],
       tasks: [],
       requirements: [],
       tests: [],
@@ -659,8 +667,59 @@ describe("SPEC-006 · AC-8 · cierre técnico gates", () => {
     });
     expect(r.ok).toBe(false);
   });
+  // IMPL-20260825-31 · módulo requerido no `deployed` bloquea el cierre.
+  it("validateCloseTechnicalGates: módulo required `pending` → 409 con razón", () => {
+    const r = validateCloseTechnicalGates({
+      modules: [
+        { status: "pending", required: true },
+        { status: "testing", required: true },
+      ],
+      tasks: [],
+      requirements: [],
+      tests: [],
+      deliverables: [],
+      changeRequests: [],
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("CLOSE_GATES");
+      expect(r.reasons).toContain("Módulos requeridos sin desplegar: 2");
+    }
+  });
+  it("validateCloseTechnicalGates: módulo required `deployed` → ok (no bloquea)", () => {
+    const r = validateCloseTechnicalGates({
+      modules: [
+        { status: "deployed", required: true },
+        { status: "deployed", required: true },
+      ],
+      tasks: [],
+      requirements: [],
+      tests: [],
+      deliverables: [],
+      changeRequests: [],
+    });
+    expect(r.ok).toBe(true);
+  });
+  it("validateCloseTechnicalGates: módulo NOT-required `pending` → ok (no bloquea)", () => {
+    const r = validateCloseTechnicalGates({
+      modules: [
+        { status: "pending", required: false },
+        { status: "cancelled", required: false },
+      ],
+      tasks: [],
+      requirements: [],
+      tests: [],
+      deliverables: [],
+      changeRequests: [],
+    });
+    expect(r.ok).toBe(true);
+  });
   it("validateCloseTechnicalGates: happy path completo → ok", () => {
     const r = validateCloseTechnicalGates({
+      modules: [
+        { status: "deployed", required: true },
+        { status: "deployed", required: true },
+      ],
       tasks: [
         { status: "done", weight: 1 },
         { status: "cancelled", weight: 1 },

@@ -9,6 +9,12 @@
  * NO exige saldo cero: es cierre técnico, no administrativo (SPEC
  * §3.2, BR-N392). El cierre administrativo vive en SPEC-004.
  *
+ * Unificación IMPL-20260825-31: los gates de cierre técnico ahora
+ * también exigen módulos requeridos `deployed` (SPEC-005 §6 / AC-8 ·
+ * `MODULE_DEPLOY_GATES`), alineando `cierre.closeTechnical` con
+ * `projects.complete`. `closeTechnical` revalida dentro de la misma
+ * transacción que muta el proyecto (defensa TOCTOU).
+ *
  * Además expone `progress(projectId)` y `health(projectId)` (AC-9,
  * BR-N367/368-370) para alimentar la UI sin recalcular en cliente.
  */
@@ -17,6 +23,7 @@ import { getDb, withTx } from "@/server/db/client";
 import {
   changeRequests,
   deliverables,
+  modules,
   projects,
   requirements,
   taskChecklists,
@@ -134,7 +141,21 @@ export function createCierreService(): CierreService {
           eq(changeRequests.projectId, projectId),
         ),
       );
+    // IMPL-20260825-31 · unificación del gate de módulos: leemos
+    // SOLO el mismo `organizationId`+`projectId` (defensa por
+    // precedencia multi-tenant). El filtro "obligatorio" se evalúa
+    // en el helper (`required && status !== 'deployed'`).
+    const moduleRows = await db
+      .select({ status: modules.status, required: modules.required })
+      .from(modules)
+      .where(
+        and(eq(modules.organizationId, orgId), eq(modules.projectId, projectId)),
+      );
     return {
+      modules: moduleRows.map((m) => ({
+        status: m.status,
+        required: !!m.required,
+      })),
       tasks: taskRows,
       requirements: reqSnapshot,
       tests: testRows,
@@ -180,6 +201,9 @@ export function createCierreService(): CierreService {
     await createHasPermissionService().require(ctx, "gestionar_proyectos", {
       forceDb: true,
     });
+    // Pre-check barato con el pool externo: mensaje 409 limpio al
+    // cliente con la lista completa de razones. La revalidación
+    // transaccional bajo `tx` más abajo es la que cierra el TOCTOU.
     const snapshot = await previewCloseGates(ctx, input);
     if (!snapshot.canClose) {
       throw new DomainError(
@@ -206,6 +230,96 @@ export function createCierreService(): CierreService {
         throw new DomainError(
           "CLOSE_GATES",
           "El proyecto está cancelado",
+          409,
+        );
+      }
+      // IMPL-20260825-31 · revalidación transaccional de gates
+      // (incluye módulos required `deployed`, alineado con
+      // `projects.complete` · `MODULE_DEPLOY_GATES`). Defensa TOCTOU:
+      // una mutación concurrente entre el pre-check y la apertura
+      // del `tx` podría haber abierto un módulo o cambiado un
+      // entregable; releer bajo `tx` y validar otra vez evita que la
+      // marca `delivery/completed` se escriba con gates obsoletos.
+      const txModuleRows = await tx
+        .select({ status: modules.status, required: modules.required })
+        .from(modules)
+        .where(
+          and(
+            eq(modules.organizationId, user.organization_id),
+            eq(modules.projectId, input.projectId),
+          ),
+        );
+      const txTaskRows = await tx
+        .select({ status: tasks.status, weight: tasks.weight })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.organizationId, user.organization_id),
+            eq(tasks.projectId, input.projectId),
+          ),
+        );
+      const txReqRows = await tx
+        .select({ status: requirements.status, required: requirements.assignedTo })
+        .from(requirements)
+        .where(
+          and(
+            eq(requirements.organizationId, user.organization_id),
+            eq(requirements.projectId, input.projectId),
+          ),
+        );
+      const txTestRows = await tx
+        .select({
+          type: tests.type,
+          status: tests.status,
+          notApplicableReason: tests.notApplicableReason,
+          notApplicableApprovedBy: tests.notApplicableApprovedBy,
+        })
+        .from(tests)
+        .where(
+          and(
+            eq(tests.organizationId, user.organization_id),
+            eq(tests.projectId, input.projectId),
+          ),
+        );
+      const txDelivRows = await tx
+        .select({ status: deliverables.status, required: deliverables.required })
+        .from(deliverables)
+        .where(
+          and(
+            eq(deliverables.organizationId, user.organization_id),
+            eq(deliverables.projectId, input.projectId),
+          ),
+        );
+      const txCrRows = await tx
+        .select({ status: changeRequests.status })
+        .from(changeRequests)
+        .where(
+          and(
+            eq(changeRequests.organizationId, user.organization_id),
+            eq(changeRequests.projectId, input.projectId),
+          ),
+        );
+      const txGates = validateCloseTechnicalGates({
+        modules: txModuleRows.map((m) => ({
+          status: m.status,
+          required: !!m.required,
+        })),
+        tasks: txTaskRows,
+        requirements: txReqRows.map((r) => ({
+          status: r.status,
+          required: true,
+        })),
+        tests: txTestRows,
+        deliverables: txDelivRows.map((d) => ({
+          status: d.status,
+          required: d.required === "true",
+        })),
+        changeRequests: txCrRows,
+      });
+      if (!txGates.ok) {
+        throw new DomainError(
+          "CLOSE_GATES",
+          `Gates pendientes: ${txGates.reasons.join("; ")}`,
           409,
         );
       }

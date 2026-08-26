@@ -30,6 +30,7 @@ import {
   TEST_TYPES,
   type ChangeRequestStatus,
   type DeliverableStatus,
+  type ModuleStatus,
   type RequirementStatus,
   type TaskStatus,
   type TestStatus,
@@ -464,23 +465,35 @@ export type CloseTechnicalGateError =
  * con la lista de motivos (`reasons`) cuando alguno falla.
  *
  * Gates:
- *  1. Tareas: ninguna tarea crítica (weight ≥ 1 y status no terminal)
+ *  1. Módulos requeridos: todos los módulos `required` deben estar
+ *     `deployed` (SPEC-005 §6 / AC-8 · defensa `MODULE_DEPLOY_GATES`
+ *     unificada — IMPL-20260825-31).
+ *  2. Tareas: ninguna tarea crítica (weight ≥ 1 y status no terminal)
  *     abierta. Una tarea está "abierta" si su status no es `done`,
  *     `cancelled` ni `blocked` (las canceladas no cuentan para
  *     el denominador BR-N367).
- *  2. Requerimientos obligatorios: todos los `requirements` deben
+ *  3. Requerimientos obligatorios: todos los `requirements` deben
  *     estar `validated`, `rejected` u `out_of_scope`.
- *  3. Pruebas bloqueantes: las de tipo `functional`/`visual`/`ui`/
+ *  4. Pruebas bloqueantes: las de tipo `functional`/`visual`/`ui`/
  *     `acceptance`/`compatibility` deben estar `passed` o
  *     `not_applicable` con justificación válida.
- *  4. Entregables obligatorios: deben estar `accepted` o
+ *  5. Entregables obligatorios: deben estar `accepted` o
  *     `rejected` (un entregable rechazado se considera cerrado).
- *  5. Cambios: ningún CR en estado abierto (no `validated`, no
+ *  6. Cambios: ningún CR en estado abierto (no `validated`, no
  *     `rejected`, no `cancelled`).
  *
  * NO exige saldo cero (BR-N392): es cierre técnico, no administrativo.
+ *
+ * IMPORTANTE: el snapshot de `modules` debe pertenecer a la misma
+ * organización y proyecto que el resto; el helper NO lo valida
+ * (responsabilidad del servicio, que ya filtra por `organizationId`
+ * y `projectId` antes de llamar).
  */
 export function validateCloseTechnicalGates(input: {
+  modules: Array<{
+    status: ModuleStatus | string;
+    required: boolean;
+  }>;
   tasks: Array<{ status: TaskStatus | string; weight: number }>;
   requirements: Array<{
     status: RequirementStatus | string;
@@ -500,7 +513,19 @@ export function validateCloseTechnicalGates(input: {
 }): { ok: true } | { ok: false; code: "CLOSE_GATES"; reasons: string[] } {
   const reasons: string[] = [];
 
-  // 1) Tareas abiertas (no terminales: done, cancelled, blocked)
+  // 1) Módulos requeridos no desplegados
+  //    (unificación con `projects.complete` MODULE_DEPLOY_GATES,
+  //    IMPL-20260825-31). Sólo cuentan los `required=true`. Un módulo
+  //    cancelado no bloquea (no se hará) pero por defensa el helper
+  //    acepta cualquier status distinto de `deployed` como pendiente.
+  const openModules = input.modules.filter(
+    (m) => m.required && m.status !== "deployed",
+  );
+  if (openModules.length > 0) {
+    reasons.push(`Módulos requeridos sin desplegar: ${openModules.length}`);
+  }
+
+  // 2) Tareas abiertas (no terminales: done, cancelled, blocked)
   const openTasks = input.tasks.filter(
     (t) =>
       t.status !== "done" &&
@@ -511,7 +536,7 @@ export function validateCloseTechnicalGates(input: {
     reasons.push(`Tareas abiertas: ${openTasks.length}`);
   }
 
-  // 2) Requerimientos obligatorios validados
+  // 3) Requerimientos obligatorios validados
   const openRequirements = input.requirements.filter(
     (r) =>
       r.required &&
@@ -525,7 +550,7 @@ export function validateCloseTechnicalGates(input: {
     );
   }
 
-  // 3) Pruebas bloqueantes: tipo en BLOCKING_TEST_TYPES y
+  // 4) Pruebas bloqueantes: tipo en BLOCKING_TEST_TYPES y
   //    status ∉ {passed, not_applicable (con justificación)}
   const blockingOpen = input.tests.filter((t) => {
     if (!isBlockingTestType(t.type)) return false;
@@ -546,7 +571,7 @@ export function validateCloseTechnicalGates(input: {
     reasons.push(`Pruebas bloqueantes pendientes: ${blockingOpen.length}`);
   }
 
-  // 4) Entregables obligatorios no aceptados ni rechazados
+  // 5) Entregables obligatorios no aceptados ni rechazados
   const openDeliverables = input.deliverables.filter(
     (d) =>
       d.required &&
@@ -560,7 +585,7 @@ export function validateCloseTechnicalGates(input: {
     );
   }
 
-  // 5) Cambios abiertos (no terminales)
+  // 6) Cambios abiertos (no terminales)
   const openChanges = input.changeRequests.filter(
     (c) =>
       c.status !== "validated" &&
