@@ -1,7 +1,7 @@
 # ADR-20260817-09 · Integración PAC FacturoPorTi
 
 - **ID:** ARCH-20260817-09
-- **Estado:** proposed
+- **Estado:** superseded (2026-08-25; proveedor reemplazado por Facturapi)
 - **Versión:** 1.0
 - **Propietario:** INTEGRA
 - **Fecha:** 2026-08-19 (v1.0)
@@ -63,3 +63,5 @@ Vector IA es cliente real de FacturoPorTi. DEC-FUN-50 ratificó el timbrado CFDI
 - Derivado de: DEC-FUN-10/50, B18, H-20260817-04.
 - Relacionado: ADR-20260817-03 (CSD cifrado), ADR-20260817-07 (reintentos/DLQ), ADR-01 §10.2 (adaptador out).
 - Aplica a: SPEC-007 (Facturación).
+
+> Esta ADR se conserva como antecedente histórico. El proveedor activo y el contrato HTTP vigente están en `ADR-20260825-01-integracion-facturapi.md`.

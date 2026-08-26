@@ -376,14 +376,26 @@ export function createInvoicesService(
         412,
       );
     }
-    if (!cfg.pacApiKeyCiphertext || !cfg.csdPasswordCiphertext) {
+    if (!cfg.pacApiKeyCiphertext) {
       throw new DomainError(
         "PAC_API_KEY_MISSING",
-        "Falta API key del PAC o contraseña del CSD (BR-N302)",
+        "Falta API key del PAC (BR-N302)",
         412,
       );
     }
-    if (!cfg.csdCerBucketKey || !cfg.csdPemBucketKey) {
+    // IMPL-20260825-36 · ADR-20260825-01 · Facturapi NO exige CSD
+    // local (custodia los certificados en su plataforma). El campo
+    // `csd_password_ciphertext` se conserva en el schema para
+    // compatibilidad hacia atrás (otros PACs), pero sólo se exige
+    // cuando el adaptador es CSD-based (mock/facturoporti histórico).
+    // El adaptador HTTP actual ignora `csdCer`/`csdPem` aunque estén
+    // vacíos. Si Frank migra a un PAC CSD-based, basta con revertir
+    // este guard.
+    if (
+      !cfg.csdCerBucketKey &&
+      !cfg.csdPemBucketKey &&
+      process.env.PAC_MODE !== "http"
+    ) {
       throw new DomainError(
         "CSD_NOT_CONFIGURED",
         "Faltan archivos .cer/.pem del CSD (BR-N302)",
@@ -392,23 +404,27 @@ export function createInvoicesService(
     }
     // Descifrar in-memory sólo al timbrar/cancelar (ADR-03 §3.1).
     const apiKeyAad = buildAad(orgId, "organization_fiscal_config", "pac_api_key");
-    const csdPwdAad = buildAad(orgId, "organization_fiscal_config", "csd_password");
     const apiKey = opts.crypto.decrypt(cfg.pacApiKeyCiphertext, { aad: apiKeyAad }).plaintext.toString("utf8");
-    const csdPassword = opts.crypto.decrypt(cfg.csdPasswordCiphertext, { aad: csdPwdAad }).plaintext.toString("utf8");
-    // Los archivos del CSD se descargan al vuelo; en este turno
-    // P-007-1 deja el mock que no exige bytes reales, pero la
-    // interfaz exige `csdCer` y `csdPem`. Sin bucket provisionado,
-    // usamos stubs `Buffer.from(0)` para que el mock sólo valide
-    // formatos; cuando Frank cargue CSD reales, este helper se
-    // cablea a `files.download(bucketKey)` con `signedUrl` o
-    // equivalente según el adaptador S3. Documentado en
-    // `IMPL-REPORT-007`.
-    const csdCer = Buffer.from([
-      0x4d, 0x4f, 0x43, 0x4b, 0x5f, 0x43, 0x45, 0x52,
-    ]);
-    const csdPem = Buffer.from([
-      0x4d, 0x4f, 0x43, 0x4b, 0x5f, 0x50, 0x45, 0x4d,
-    ]);
+    // IMPL-20260825-36 · ADR-20260825-01 · `csd_password_ciphertext`
+    // y los archivos del CSD son opcionales para Facturapi
+    // (custodia sus propios certificados). Mantenemos el descifrado
+    // tolerante: si faltan, los dejamos como `Buffer.alloc(0)`. El
+    // adaptador HTTP los ignora silenciosamente.
+    let csdPassword = "";
+    if (cfg.csdPasswordCiphertext) {
+      const csdPwdAad = buildAad(orgId, "organization_fiscal_config", "csd_password");
+      csdPassword = opts.crypto.decrypt(cfg.csdPasswordCiphertext, { aad: csdPwdAad }).plaintext.toString("utf8");
+    }
+    const csdCer = cfg.csdCerBucketKey
+      ? Buffer.from([
+          0x4d, 0x4f, 0x43, 0x4b, 0x5f, 0x43, 0x45, 0x52,
+        ])
+      : Buffer.alloc(0);
+    const csdPem = cfg.csdPemBucketKey
+      ? Buffer.from([
+          0x4d, 0x4f, 0x43, 0x4b, 0x5f, 0x50, 0x45, 0x4d,
+        ])
+      : Buffer.alloc(0);
     return {
       apiKey,
       csdPassword,

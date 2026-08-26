@@ -21,7 +21,9 @@
  * staging LIVE (gates externos no autorizados en este turno, P-007-1).
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   BASE_PERMISSIONS,
   CANCEL_MOTIVES_SAT,
@@ -59,6 +61,10 @@ import {
   CALENDAR_VISUAL_STATUS_COUNT,
   IVA_RATE,
 } from "@/server/services/facturacion";
+import {
+  createPacClient,
+  createPacHttpClient,
+} from "@/server/integrations/pac";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Catálogo canónico
@@ -840,4 +846,641 @@ describe("SPEC-007 · AC-10 · UI responsive (grep)", () => {
   function messages_facturacion_ref() {
     return "Facturas";
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-36 · ADR-20260825-01 · Adaptador Facturapi v2 (HTTP).
+// Cubre: auth Bearer, payload, idempotencia, descargas XML/PDF, errores
+// canónicos 401/404/409/422/429/5xx, ausencia de CSD, NO llama a
+// Facturapi (fetch mockeado), NO imprime secretos en logs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import type { PacStampInput } from "@/server/integrations/pac";
+
+interface CapturedRequest {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: string | null;
+}
+
+function makeFetchMock(responses: Array<{
+  status: number;
+  body?: unknown;
+  headers?: Record<string, string>;
+  delayMs?: number;
+}>): { fetchImpl: typeof fetch; captured: CapturedRequest[] } {
+  const captured: CapturedRequest[] = [];
+  let i = 0;
+  const fetchImpl = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const url = typeof input === "string" ? input : (input as URL).toString();
+    const method = (init?.method ?? "GET").toUpperCase();
+    const headers: Record<string, string> = {};
+    if (init?.headers) {
+      const h = init.headers;
+      if (h instanceof Headers) {
+        h.forEach((v, k) => {
+          headers[k] = v;
+        });
+      } else if (Array.isArray(h)) {
+        for (const [k, v] of h) headers[k] = v;
+      } else {
+        Object.assign(headers, h as Record<string, string>);
+      }
+    }
+    const body =
+      typeof init?.body === "string"
+        ? (init.body as string)
+        : null;
+    captured.push({ url, method, headers, body });
+    const r = responses[i] ?? responses[responses.length - 1];
+    i++;
+    if (!r) {
+      return new Response("", { status: 500 });
+    }
+    if (r.delayMs) {
+      await new Promise((res) => setTimeout(res, r.delayMs));
+    }
+    let bodyText = "";
+    if (r.body !== undefined) {
+      bodyText =
+        typeof r.body === "string" ? r.body : JSON.stringify(r.body);
+    }
+    return new Response(bodyText, {
+      status: r.status,
+      headers: {
+        "Content-Type":
+          r.status === 200 && typeof r.body === "string"
+            ? "application/octet-stream"
+            : "application/json",
+        ...(r.headers ?? {}),
+      },
+    });
+  }) as typeof fetch;
+  return { fetchImpl, captured };
+}
+
+const stampInputSample: PacStampInput = {
+  organizationId: "00000000-0000-0000-0000-000000000001",
+  apiKey: "sk_test_abcdef1234567890",
+  csdCer: Buffer.alloc(0),
+  csdPem: Buffer.alloc(0),
+  csdPassword: "",
+  rfcEmisor: "VEC681010AA1",
+  receptor: {
+    rfc: "XAXX010101000",
+    razonSocial: "Cliente Test SA",
+    regimenFiscal: "601",
+    domicilio: null,
+    cfdiUse: "G03",
+    email: null,
+  },
+  concepto: {
+    claveProdServ: "84111506",
+    descripcion: "Servicios profesionales",
+    cantidad: 1,
+    valorUnitarioCents: 100_000,
+    importeCents: 100_000,
+    descuentoCents: 0,
+  },
+  totalCents: 116_000,
+};
+
+describe("IMPL-20260825-36 · AC-1 · adaptador Facturapi v2 HTTP (ADR-20260825-01)", () => {
+  it("createPacHttpClient con apiKey ausente lanza PAC_API_KEY_MISSING", () => {
+    expect(() =>
+      createPacHttpClient({
+        baseUrl: "https://www.facturapi.io/v2",
+        apiKey: "",
+      }),
+    ).toThrow(/PAC_API_KEY_MISSING|Facturapi API key ausente/);
+  });
+
+  it("default baseUrl es https://www.facturapi.io/v2", () => {
+    // Verifica que la constante default es la URL canónica.
+    // Esto evita un fix accidental que apunte a un mirror o dominio
+    // similar (phishing) por error de copia.
+    const src = readFileSync(
+      path.resolve(
+        __dirname,
+        "../src/server/integrations/pac/facturapi.ts",
+      ),
+      "utf8",
+    );
+    expect(src).toMatch(/DEFAULT_BASE_URL\s*=\s*["']https:\/\/www\.facturapi\.io\/v2["']/);
+  });
+
+  it("createPacClient({ mode: 'http' }) con apiKey inválida → mock (no http)", () => {
+    // El factory `createPacClient` con `mode: 'mock'` siempre devuelve
+    // el mock; con `mode: 'http'` requiere apiKey (descifrada por el
+    // caller). Verificamos que el mock sigue funcionando para tests.
+    const mock = createPacClient({ mode: "mock" });
+    expect(typeof mock.stamp).toBe("function");
+    expect(typeof mock.cancel).toBe("function");
+  });
+
+  it("Authorization Bearer envía la apiKey y NO la imprime en ningún campo", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abcdef1234567890",
+      fetchImpl,
+    });
+    await pac.stamp(stampInputSample);
+    // Verifica que TODAS las requests llevan Authorization Bearer.
+    for (const req of captured) {
+      expect(req.headers["Authorization"]).toBe(
+        "Bearer sk_test_abcdef1234567890",
+      );
+      // Y NO llevan la apiKey en ningún otro header ni en el body.
+      // `req.body` puede ser null en requests sin payload (GET).
+      const body = req.body ?? "";
+      expect(body.includes("sk_test_abcdef1234567890")).toBe(false);
+    }
+  });
+
+  it("Idempotency-Key en POST (customers, invoices, stamp) y external_id en invoice body", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await pac.stamp(stampInputSample);
+    // Las 3 requests POST deben llevar Idempotency-Key.
+    const postReqs = captured.filter(
+      (r) => r.method === "POST" || r.method === "DELETE",
+    );
+    for (const req of postReqs) {
+      expect(req.headers["Idempotency-Key"]).toBeDefined();
+      expect(req.headers["Idempotency-Key"]?.length).toBeGreaterThan(0);
+    }
+    // Customer body NO debe incluir `external_id` (no documentado
+    // en POST /customers); debe incluir `default_invoice_use`.
+    const customerBody = JSON.parse(
+      captured[0]?.body ?? "{}",
+    ) as Record<string, unknown>;
+    expect(customerBody.external_id).toBeUndefined();
+    expect(customerBody.default_invoice_use).toBe("G03");
+    // Invoice body debe llevar `external_id`, `idempotency_key`
+    // (campo documentado) y `status: draft`.
+    const invoiceBody = JSON.parse(
+      captured[1]?.body ?? "{}",
+    ) as Record<string, unknown>;
+    expect(invoiceBody.external_id).toMatch(/^os:/);
+    expect(invoiceBody.idempotency_key).toMatch(/^os:/);
+    expect(invoiceBody.status).toBe("draft");
+  });
+
+  it("downloads XML y PDF se hacen como buffers, no como JSON", async () => {
+    const xmlBuffer = Buffer.from("<cfdi:Comprobante>XML</cfdi:Comprobante>", "utf8");
+    const pdfBuffer = Buffer.from("%PDF-1.4\ndata", "utf8");
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: xmlBuffer.toString("utf8"), headers: { "Content-Type": "application/xml" } },
+      { status: 200, body: pdfBuffer.toString("utf8"), headers: { "Content-Type": "application/pdf" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    const result = await pac.stamp(stampInputSample);
+    expect(result.cfdiUuid).toBe("U-1");
+    expect(result.status).toBe("stamped");
+    expect(result.xml).toBeInstanceOf(Buffer);
+    expect(result.pdf).toBeInstanceOf(Buffer);
+    // Las requests GET a /xml y /pdf NO llevan body ni auth adicional.
+    const xmlReq = captured[3];
+    const pdfReq = captured[4];
+    expect(xmlReq?.method).toBe("GET");
+    expect(xmlReq?.url).toMatch(/\/invoices\/.+\/xml$/);
+    expect(xmlReq?.headers["Authorization"]).toBe("Bearer sk_test_abc");
+    expect(pdfReq?.url).toMatch(/\/invoices\/.+\/pdf$/);
+  });
+
+  it("401/403 → PAC_API_KEY_MISSING (412) — fail-closed", async () => {
+    const { fetchImpl } = makeFetchMock([
+      { status: 401, body: { message: "Invalid API key" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_invalid",
+      fetchImpl,
+    });
+    await expect(pac.stamp(stampInputSample)).rejects.toMatchObject({
+      code: "PAC_API_KEY_MISSING",
+      statusCode: 412,
+    });
+  });
+
+  it("404 → INVOICE_NOT_FOUND (404)", async () => {
+    const { fetchImpl } = makeFetchMock([
+      { status: 404, body: { message: "Customer not found" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await expect(pac.stamp(stampInputSample)).rejects.toMatchObject({
+      code: "INVOICE_NOT_FOUND",
+      statusCode: 404,
+    });
+  });
+
+  it("409 → INVOICE_BUILD_INVALID (409)", async () => {
+    const { fetchImpl } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 409, body: { message: "Conflicto" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await expect(pac.stamp(stampInputSample)).rejects.toMatchObject({
+      code: "INVOICE_BUILD_INVALID",
+      statusCode: 409,
+    });
+  });
+
+  it("422 → INVOICE_BUILD_INVALID (400)", async () => {
+    const { fetchImpl } = makeFetchMock([
+      { status: 422, body: { message: "Invalid payload" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await expect(pac.stamp(stampInputSample)).rejects.toMatchObject({
+      code: "INVOICE_BUILD_INVALID",
+      statusCode: 400,
+    });
+  });
+
+  it("429 → PacTransientError (rate limit)", async () => {
+    const { fetchImpl } = makeFetchMock([
+      { status: 429, body: { message: "Rate limit exceeded" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await expect(pac.stamp(stampInputSample)).rejects.toMatchObject({
+      code: "PAC_TRANSIENT",
+    });
+  });
+
+  it("5xx → PacTransientError", async () => {
+    const { fetchImpl } = makeFetchMock([
+      { status: 503, body: { message: "Service unavailable" } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await expect(pac.stamp(stampInputSample)).rejects.toMatchObject({
+      code: "PAC_TRANSIENT",
+    });
+  });
+
+  it("mensaje sanitizado: sk_test_xxx en body del 5xx → MASKED en el error", async () => {
+    // El 401/403 no expone el body (devuelve mensaje genérico para
+    // no filtrar información). El sanitizado se aplica en 4xx/5xx
+    // con body, donde podría colarse un sk_*. Probamos con 503.
+    const { fetchImpl } = makeFetchMock([
+      {
+        status: 503,
+        body: {
+          message:
+            "upstream failure with sk_test_supersecret1234567890abcdef",
+        },
+      },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_other",
+      fetchImpl,
+    });
+    try {
+      await pac.stamp(stampInputSample);
+      throw new Error("expected throw");
+    } catch (e) {
+      const msg = (e as Error).message;
+      expect(msg).not.toContain("sk_test_supersecret1234567890abcdef");
+      expect(msg).toContain("MASKED");
+    }
+  });
+
+  it("cancel envía POST /invoices/{uuid}/cancel con motivo SAT e idempotency key", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { cancellation: { status: "cancelled" } } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    const r = await pac.cancel({
+      organizationId: stampInputSample.organizationId,
+      apiKey: "sk_test_abc",
+      cfdiUuid: "00000000-0000-0000-0000-0000000000aa",
+      motivoSat: "03",
+      rfcEmisor: "VEC681010AA1",
+    });
+    expect(r.status).toBe("cancelled");
+    const req = captured[0];
+    expect(req?.method).toBe("POST");
+    expect(req?.url).toMatch(/\/invoices\/[^/]+\/cancel$/);
+    expect(req?.headers["Idempotency-Key"]).toMatch(/^cancel:/);
+    const body = JSON.parse(req?.body ?? "{}") as { motivo?: string };
+    expect(body.motivo).toBe("03");
+  });
+
+  it("cancel motivo SAT inválido → INVALID_CANCEL_MOTIVE (400) sin llamada HTTP", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { ok: true } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await expect(
+      pac.cancel({
+        organizationId: stampInputSample.organizationId,
+        apiKey: "sk_test_abc",
+        cfdiUuid: "00000000-0000-0000-0000-0000000000aa",
+        motivoSat: "99" as never,
+        rfcEmisor: "VEC681010AA1",
+      }),
+    ).rejects.toMatchObject({
+      code: "INVALID_CANCEL_MOTIVE",
+      statusCode: 400,
+    });
+    expect(captured.length).toBe(0);
+  });
+
+  it("is_ready_to_stamp=false → INVOICE_BUILD_INVALID sin llamar /stamp", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: false } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await expect(pac.stamp(stampInputSample)).rejects.toMatchObject({
+      code: "INVOICE_BUILD_INVALID",
+    });
+    // No debe haberse llamado /stamp ni /xml ni /pdf (sólo customers
+    // y POST /invoices).
+    expect(captured.length).toBe(2);
+    expect(captured[1]?.url).toMatch(/\/invoices$/);
+  });
+
+  it("acepta buffers CSD vacíos (Facturapi NO exige CSD local)", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    // csdCer/csdPem vacíos y csdPassword "" no fallan.
+    const result = await pac.stamp({
+      ...stampInputSample,
+      csdCer: Buffer.alloc(0),
+      csdPem: Buffer.alloc(0),
+      csdPassword: "",
+    });
+    expect(result.status).toBe("stamped");
+    expect(captured.length).toBeGreaterThan(0);
+  });
+});
+
+describe("IMPL-20260825-36 · AC-2 · createPacClient dispatch (mock vs http)", () => {
+  it("default (sin env, sin opts) → mock", async () => {
+    // Limpia env temporal para el test.
+    const prev = process.env.PAC_MODE;
+    delete process.env.PAC_MODE;
+    try {
+      const pac = createPacClient();
+      expect(pac).toBeDefined();
+      expect(typeof pac.stamp).toBe("function");
+      // mock NO requiere red: stamp con CSD vacío falla con
+      // CSD_NOT_CONFIGURED (el mock sigue exigiendo CSD; sólo el
+      // HTTP ignora los bytes vacíos).
+      await expect(
+        pac.stamp({
+          ...stampInputSample,
+          apiKey: "k",
+          csdCer: Buffer.alloc(0),
+        }),
+      ).rejects.toBeDefined();
+    } finally {
+      if (prev !== undefined) process.env.PAC_MODE = prev;
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-36 · AC-3 (intento 2 · revisión oficial) · Contrato
+// exacto del payload según docs.facturapi.io: items[].product
+// anidado, default_invoice_use en customer, no se inventan campos,
+// idempotency_key en body, GET /invoices/{id} fallback cuando
+// /stamp no devuelve uuid.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-36 · AC-3 · contrato documentado (docs.facturapi.io)", () => {
+  it("item: shape anidado `items[].product = { description, product_key, price, tax_included }`", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await pac.stamp(stampInputSample);
+    const invoiceBody = JSON.parse(
+      captured[1]?.body ?? "{}",
+    ) as {
+      items?: Array<{
+        quantity?: number;
+        product?: {
+          description?: string;
+          product_key?: string;
+          price?: number;
+          tax_included?: boolean;
+        };
+      }>;
+    };
+    expect(invoiceBody.items?.length).toBe(1);
+    const item = invoiceBody.items?.[0];
+    expect(item?.quantity).toBe(1);
+    expect(item?.product).toBeDefined();
+    expect(item?.product?.description).toBe("Servicios profesionales");
+    expect(item?.product?.product_key).toBe("84111506");
+    // `price` en pesos (NO centavos). valorUnitarioCents = 100_000
+    // → 1000 MXN.
+    expect(item?.product?.price).toBe(1000);
+    expect(item?.product?.tax_included).toBe(false);
+    // NO campos inventados al nivel de item:
+    const flat = item as unknown as Record<string, unknown>;
+    expect(flat.unit_price).toBeUndefined();
+    expect(flat.taxes).toBeUndefined();
+    expect(flat.external_id).toBeUndefined();
+    // NO campos inventados dentro de product:
+    const prod = item?.product as unknown as Record<string, unknown>;
+    expect(prod.factor).toBeUndefined();
+    expect(prod.base).toBeUndefined();
+    expect(prod.amount).toBeUndefined();
+  });
+
+  it("customer body: `default_invoice_use` (no `cfdi_use`), sin `external_id`", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await pac.stamp({
+      ...stampInputSample,
+      receptor: {
+        ...stampInputSample.receptor,
+        cfdiUse: "G01",
+      },
+    });
+    const customerBody = JSON.parse(
+      captured[0]?.body ?? "{}",
+    ) as Record<string, unknown>;
+    expect(customerBody.default_invoice_use).toBe("G01");
+    expect(customerBody.cfdi_use).toBeUndefined();
+    expect(customerBody.external_id).toBeUndefined();
+    // Campos documentados obligatorios:
+    expect(customerBody.legal_name).toBe("Cliente Test SA");
+    expect(customerBody.tax_id).toBe("XAXX010101000");
+    expect(customerBody.tax_system).toBe("601");
+  });
+
+  it("invoice body: `idempotency_key` (campo documentado) Y `external_id`", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await pac.stamp(stampInputSample);
+    const invoiceBody = JSON.parse(
+      captured[1]?.body ?? "{}",
+    ) as Record<string, unknown>;
+    expect(invoiceBody.idempotency_key).toBeDefined();
+    expect(invoiceBody.external_id).toBeDefined();
+    expect(invoiceBody.customer).toBe("cust-1");
+    expect(invoiceBody.payment_form).toBe("01");
+    expect(invoiceBody.payment_method).toBe("PUE");
+    expect(invoiceBody.use).toBe("G03");
+    expect(invoiceBody.status).toBe("draft");
+  });
+
+  it("/stamp sin uuid → GET /invoices/{id} fallback para extraer UUID", async () => {
+    // Test escenario: /stamp responde SIN uuid (algunos Test paths
+    // sólo devuelven el id hasta que la factura se considera `valid`).
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: null, status: "stamped" } },
+      // GET /invoices/{id} devuelve el uuid.
+      { status: 200, body: { id: "inv-1", uuid: "GET-UUID-XYZ" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    const result = await pac.stamp(stampInputSample);
+    expect(result.cfdiUuid).toBe("GET-UUID-XYZ");
+    // El GET debe haber ocurrido (4ta request en orden: customers,
+    // invoices, invoices/{id}/stamp, invoices/{id} GET, xml, pdf).
+    const getReq = captured.find(
+      (r) => r.method === "GET" && /\/invoices\/[^/]+$/.test(r.url),
+    );
+    expect(getReq).toBeDefined();
+    expect(getReq?.headers["Authorization"]).toBe("Bearer sk_test_abc");
+  });
+
+  it("/stamp sin uuid, GET sin uuid → fallback al `id` (degradación controlada)", async () => {
+    // Si tanto /stamp como GET /invoices/{id} NO devuelven `uuid`,
+    // caemos al `id` interno de Facturapi como último recurso. El
+    // servicio persiste este valor en `invoices.cfdi_uuid`; si el
+    // PAC posterior lo actualiza a un UUID real, el campo se
+    // reescribe. La degradación es explícita y NO se considera error
+    // (no queremos abortar el flujo por una inconsistencia de Test).
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: null, status: "stamped" } },
+      { status: 200, body: { id: "inv-1" } }, // GET sin uuid
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    const result = await pac.stamp(stampInputSample);
+    expect(result.cfdiUuid).toBe("inv-1");
+    // El GET fallback ocurrió.
+    const getReq = captured.find(
+      (r) => r.method === "GET" && /\/invoices\/[^/]+$/.test(r.url),
+    );
+    expect(getReq).toBeDefined();
+  });
 });

@@ -5,17 +5,17 @@
 - **Versión:** 1.0
 - **Propietario:** INTEGRA
 - **Fecha:** 2026-08-19 (v1.0)
-- **Módulo funcional cubierto:** Facturación CFDI 4.0: timbrado vía FacturoPorTi, cancelación con motivo SAT, conservación de UUID/XML/PDF, calendario de 7 estados, facturación recurrente nocturna, ZIP mensual contador, y la **factura borrador de renovación** consumida desde SPEC-011. Block B18.
-- **ADRs de referencia:** ARCH-20260817-09 (integración PAC), ARCH-20260817-03 (CSD cifrado), ARCH-20260817-01, ARCH-20260819-03, ARCH-20260817-07 (jobs).
+- **Módulo funcional cubierto:** Facturación CFDI 4.0: timbrado vía Facturapi, cancelación con motivo SAT, conservación de UUID/XML/PDF, calendario de 7 estados, facturación recurrente nocturna, ZIP mensual contador, y la **factura borrador de renovación** consumida desde SPEC-011. Block B18.
+- **ADRs de referencia:** ARCH-20260825-01 (integración Facturapi), ARCH-20260817-03 (secretos cifrados), ARCH-20260817-01, ARCH-20260819-03, ARCH-20260817-07 (jobs).
 - **Depende de:** SPEC-001 (crypto CSD/API key, `files`, jobs pg-boss), SPEC-002 (cliente/datos fiscales), SPEC-003 (cotización/importes/tipo_cobro). **Es consumida por** SPEC-011 (renovación→factura borrador, BR-N406) y SPEC-008 (aplicación de cobros).
 
 ---
 
 ## 1. Resultado
-El sistema timbra CFDI 4.0 directamente vía FacturoPorTi (DEC-FUN-50, BR-N301), conserva UUID/XML/PDF, soporta cancelación con motivo SAT, calendario de cobranza de 7 estados, facturación recurrente nocturna y ZIP mensual para contador. Renovar una Suscripción (SPEC-011) crea aquí una **factura en borrador** del nuevo periodo; Facturación conserva revisión/timbrado/emisión (BR-N406, DEC-FUN-67).
+El sistema timbra CFDI 4.0 directamente vía Facturapi (DEC-FUN-20260825-01, BR-N301), conserva UUID/XML/PDF, soporta cancelación con motivo SAT, calendario de cobranza de 7 estados, facturación recurrente nocturna y ZIP mensual para contador. Renovar una Suscripción (SPEC-011) crea aquí una **factura en borrador** del nuevo periodo; Facturación conserva revisión/timbrado/emisión (BR-N406, DEC-FUN-67).
 
 ## 2. Fuentes funcionales por ID
-- **DEC-FUN:** DEC-FUN-08 (sin módulo Impuestos; ZIP contador), DEC-FUN-10/50 (timbrado real FacturoPorTi), DEC-FUN-26 (ZIP auto mensual + manual), DEC-FUN-38 (ZIP sólo facturas activas), DEC-FUN-20260818-67 (renovar→factura borrador).
+- **DEC-FUN:** DEC-FUN-08 (sin módulo Impuestos; ZIP contador), DEC-FUN-20260825-01 (timbrado real Facturapi), DEC-FUN-26 (ZIP auto mensual + manual), DEC-FUN-38 (ZIP sólo facturas activas), DEC-FUN-20260818-67 (renovar→factura borrador).
 - **BR (B18):** BR-N301..N313. **BR-N406** (renovación→factura borrador, consumida). **Cálculo B26:** BR-N363/364/365 (facturado/cobrado/saldo factura).
 - **FLOW:** cierre (factura final antes de cierre administrativo — BR-N393, SPEC-004).
 
@@ -84,10 +84,10 @@ El sistema timbra CFDI 4.0 directamente vía FacturoPorTi (DEC-FUN-50, BR-N301),
 ## 12. Riesgos y pendientes
 - **R1:** dependencia externa PAC (disponibilidad, latencia); mitigación: reintentos/DLQ (ADR-07).
 - **R2:** CSD vigente (caducidad SAT); procedimiento operativo de renovación (Frank).
-- **P-007-1 (Frank):** credenciales PAC reales + CSD (.cer/.pem/password) + API key (acciones infraestructurales).
+- **P-007-1 (Frank):** Live Secret Key de Facturapi y autorización de producción; Test Secret Key ya probada en staging, no se persiste en documentación.
 
 ## 13. DoD
 - AC-1..AC-10 PASS; trazabilidad a BR-N301-313/N406; GEMINI **obligatorio** (toca CSD secretos, CFDI fiscal, integración externa → §17: secretos + finanzas + infra).
 
 ## 14. Handoff a SOFIA (resumen)
-- **SPEC activa:** SPEC-007. **ADRs:** 01, 03, 07, 09. **Alcance:** `src/server/db/facturacion/*`, `src/server/services/facturacion/*`, `src/server/trpc/routers/facturacion/*`, adaptador PAC `src/server/integrations/pac/*`. **Contratos protegidos:** CSD/API key cifrados, UUID/XML/PDF, motivo SAT, `audit_logs`. **Contratos que cambian:** crea factura borrador consumida por SPEC-011; emite señales de vencimiento/escalado consumidas por SPEC-008. **Prohibido inferir:** cobros/comisiones (SPEC-008), cierre administrativo OS (SPEC-004), el schedule de renovación (SPEC-011).
+- **SPEC activa:** SPEC-007. **ADRs:** 01, 03, 07, 20260825-01. **Alcance:** `src/server/db/facturacion/*`, `src/server/services/facturacion/*`, `src/server/trpc/routers/facturacion/*`, adaptador Facturapi `src/server/integrations/pac/*`. **Contratos protegidos:** secreto cifrado, UUID/XML/PDF, motivo SAT, `audit_logs`. **Contratos que cambian:** proveedor externo y payload del adaptador; crea factura borrador consumida por SPEC-011. **Prohibido inferir:** cobros/comisiones (SPEC-008), cierre administrativo OS (SPEC-004), el schedule de renovación (SPEC-011), Live/producción.

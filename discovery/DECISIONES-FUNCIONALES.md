@@ -252,6 +252,15 @@
 - **Implicación:** INTEGRA debe diseñar contrato de integración con PAC, manejo seguro de CSD (.cer + .pem + password) y API key encriptados, y el flujo de cancelación con motivo SAT (01-04). El JSON archive queda `superseded` para el alcance de facturación.
 - **Reemplaza a:** la regla "no implementar conexión directa con SAT" del `vectoria_especificacion_..._mvp.json` archive.
 
+## DEC-FUN-20260825-01 · Timbrado CFDI con Facturapi en Test confirmado
+- **Pregunta:** ¿qué proveedor debe usar Vectoria para emitir CFDI en sandbox y posteriormente en producción?
+- **Decisión:** Facturapi (`https://www.facturapi.io/v2`) con la Test Secret Key en staging/sandbox; la Live Secret Key se incorporará sólo cuando Frank la autorice para producción.
+- **Evidencia:** la documentación oficial confirma que la llave determina el ambiente Test/Live y la organización emisora; la prueba mínima `GET /v2/customers?limit=1` respondió HTTP 200 con la llave de prueba proporcionada.
+- **Estado:** confirmed (Frank, 2026-08-25).
+- **Implicación:** sustituir el adaptador FacturoPorTi/PAC por un adaptador HTTP Facturapi conservando la frontera `PacClient`, auditoría, UUID/XML/PDF, idempotencia y estados internos. Test no tiene validez fiscal ni se envía al SAT.
+- **Seguridad:** la llave proporcionada es secreta; no se persiste en código, documentación, logs ni reportes.
+- **Reemplaza a:** DEC-FUN-20260817-50 sólo respecto del proveedor PAC; se conserva la decisión de timbrado real y no registrar facturas externas.
+
 ## DEC-FUN-20260817-51 · Conteos definitivos confirmados (Q-P0-5)
 - **Pregunta:** ¿qué conteos de decisiones / reglas / módulos quedan como definitivos?
 - **Opciones consideradas:**

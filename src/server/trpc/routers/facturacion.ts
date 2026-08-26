@@ -55,12 +55,18 @@ import { createPacClient } from "@/server/integrations/pac";
  * es mock por ahora (P-007-1 cerrado en `none`).
  */
 async function buildService() {
+  // IMPL-20260825-36 · ADR-20260825-01 · La selección Facturapi HTTP
+  // vs mock se hace vía `createPacClient` (infraestructura): el
+  // router NO inspecciona env directamente. `createPacClient` lee
+  // `PAC_MODE` y `FACTURAPI_API_KEY` y construye el adaptador
+  // correspondiente. El secreto NUNCA se imprime: si llegara aquí
+  // sin querer, el log allowlist del ADR-03 §3.5 lo enmascara.
   return createInvoicesService({
     crypto: buildCryptoServiceFromEnv(),
     files: await buildFilesServiceFromEnv(),
     jobs: createJobsService(),
     audit: createAuditService(),
-    pac: createPacClient({ mode: "mock" }),
+    pac: createPacClient(),
   });
 }
 

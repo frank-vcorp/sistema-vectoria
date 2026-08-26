@@ -43,6 +43,38 @@
 
 **Determinación:** el siguiente incremento debe ser una vertical slice E2E con datos de staging controlados; no se acepta otro cierre basado sólo en HTTP 200, headings o páginas vacías.
 
+## FND-20260824-08 · Coolify reportó wrapper `No such container` durante clone
+
+**Tipo:** `FINDING` · **Estado:** `superseded-by-evidence` · **Severidad:** P3 diagnóstico
+
+**Evidencia inicial:** los deployments `7bywnjwuq8si0iluubaeplqr`, `f81vewnewfhlo6nygs4ebqdb` y `wnalqzrd6fdohuusxofgi2ss` mostraban el wrapper `No such container`.
+
+**Corrección:** el log completo aportado por Frank mostró la causa real: `fatal: couldn't find remote ref 7d70bb4`. El UUID aparecía porque Coolify reportaba el fallo del contenedor de despliegue, pero el problema era que se había configurado un SHA corto como ref remoto.
+
+**Resolución:** se cambió el pin a SHA completo y el deployment posterior terminó `finished`; no era un fallo del worker Docker.
+
+## FND-20260824-09 · Coolify requiere SHA completo para `git_commit_sha`
+
+**Tipo:** `FINDING` · **Estado:** `resolved` · **Severidad:** P1 deployment
+
+**Evidencia:** `git_commit_sha=7d70bb4` produjo `fatal: couldn't find remote ref 7d70bb4`; `git_commit_sha=7d70bb460fec55d7407fa309a4b974010a27972f` permitió clone, checkout y build correctos.
+
+**Regla operativa:** al actualizar el pin de Coolify usar siempre el SHA completo de `git ls-remote origin refs/heads/main`, no el short SHA.
+
+## FND-20260824-10 · Runtime staging tenía URLs placeholder
+
+**Tipo:** `FINDING` · **Estado:** `resolved` · **Severidad:** P1 runtime
+
+**Evidencia:** logs runtime mostraron `TypeError: Invalid URL` con `base: 'postgres://base'`; la inspección de envs encontró `DATABASE_URL` con marcador `<<host` y `APP_URL` sin esquema. Se corrigieron mediante PATCH oficial: `DATABASE_URL` desde `internal_db_url` real y `APP_URL=https://sistema-vectoria.vector-ia.mx`; se añadió predeploy idempotente `pnpm db:migrate && pnpm db:seed:plataforma`.
+
+## FND-20260824-11 · Prospectos evaluaba permisos sólo desde claims vacíos
+
+**Tipo:** `FINDING` · **Estado:** `resolved` · **Severidad:** P1 autorización
+
+**Evidencia:** Director autenticaba HTTP 200, pero `auth.me` tenía `roles=[]/permissions=[]` y `clientes.prospectos.create` devolvía 403 aunque el seed asignara rol. `prospects.ts` no pasaba `forceDb:true` a `has/require`.
+
+**Resolución:** se añadió `forceDb:true` a `resolveProspectScope` y a las cuatro mutaciones. V3 autenticado posterior creó el prospecto con HTTP 200.
+
 ## FND-20260824-03 · Coolify REST omite logs de build en la respuesta observada
 
 **Tipo:** `FINDING` · **Estado:** `confirmed` · **Severidad:** P1 para observabilidad V3
@@ -175,6 +207,12 @@ No se encontró otro manifest canónico activo, launcher o script operativo que 
 **Resolución (2026-08-17 22:00):** Frank aprobó **opción 1** — timbrado real con FacturoPorTi. Decisión registrada como **DEC-FUN-20260817-50** en `DECISIONES-FUNCIONALES.md`. El JSON archive queda `superseded` para el alcance de facturación. INTEGRA diseñará el contrato de integración con PAC, manejo seguro de CSD y API key, y el flujo de cancelación con motivo SAT (01-04).
 
 ---
+
+## FND-20260825-01 · Proveedor de timbrado confirmado como Facturapi
+- **Estado:** resolved
+- **Evidencia:** documentación oficial de Facturapi (`docs.facturapi.io/api`, guía de borradores) define API REST v2, autenticación Bearer, clientes/facturas, `POST /v2/invoices`, borradores `status=draft`, `is_ready_to_stamp` y timbrado de borrador; la prueba real Test respondió HTTP 200.
+- **Impacto:** el contrato activo anterior apuntaba a FacturoPorTi y su adaptador exige CSD local; no puede consumir directamente la llave Test de Facturapi.
+- **Resolución:** DEC-FUN-20260825-01 y ADR-20260825-01 sustituyen el proveedor, sin cambiar el flujo funcional ni la persistencia interna.
 
 ## H-20260817-05 · Conteo de decisiones / reglas / módulos (P0)
 

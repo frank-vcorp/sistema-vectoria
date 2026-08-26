@@ -46,6 +46,11 @@ import {
 } from "@/shared/enums";
 import { DomainError } from "@/shared/errors";
 
+// Re-exports para que `createPacClient({ mode: 'http' })` pueda
+// resolver el factory HTTP sin requerir import circular.
+export { createPacHttpClient } from "./facturapi";
+export type { FacturapiHttpClientOptions } from "./facturapi";
+
 /**
  * Resultado de un timbrado exitoso: UUID CFDI + buffers de XML/PDF.
  * El servicio `facturacion` los persiste en `files` (BR-N371) y guarda
@@ -143,15 +148,51 @@ export interface PacConcepto {
 }
 
 /**
- * Fábrica del cliente PAC. En este turno (P-007-1 cerrado en `none`)
- * siempre devuelve el mock determinista. Cuando Frank cargue
- * credenciales reales, este mismo factory leerá el flag y devolverá
- * `createPacHttpClient(...)` con la URL real.
+ * Fábrica del cliente PAC.
+ *
+ * Modo por defecto (`mode: "mock"`): devuelve `createPacMockClient()`.
+ * Es el modo usado por tests y por el default local de staging cuando
+ * no hay credenciales reales.
+ *
+ * Modo HTTP (`mode: "http"`): requiere `apiKey` (descifrada por el
+ * caller) y delega en `createPacHttpClient` (Facturapi v2). El caller
+ * (router o servicio) es responsable de:
+ *   - Descifrar la `apiKey` con `crypto.decrypt(...)` (ADR-03).
+ *   - NO loguear la `apiKey` en ningún punto.
+ *   - Pasar `baseUrl` desde env (`FACTURAPI_BASE_URL`) con default
+ *     `https://www.facturapi.io/v2`.
+ *
+ * Auto-detección: si NO se pasa `mode`, el factory lee `process.env`:
+ *   - `PAC_MODE=http` AND `FACTURAPI_API_KEY` set → HTTP.
+ *   - Else → mock (default seguro).
  */
-export function createPacClient(_opts?: {
-  endpoint?: string;
+export function createPacClient(opts?: {
+  baseUrl?: string;
+  apiKey?: string;
   mode?: "mock" | "http";
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
 }): PacClient {
+  const envMode = process.env.PAC_MODE === "http" ? "http" : null;
+  const envKey = process.env.FACTURAPI_API_KEY ?? "";
+  const mode = opts?.mode ?? envMode ?? "mock";
+  const apiKey = opts?.apiKey ?? envKey;
+  const baseUrl =
+    opts?.baseUrl ??
+    process.env.FACTURAPI_BASE_URL ??
+    "https://www.facturapi.io/v2";
+  if (mode === "http") {
+    // Importación perezosa: el módulo HTTP no se carga si estamos en
+    // modo mock (ahorra trabajo en tests y en el default local).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { createPacHttpClient } = require("./facturapi") as typeof import("./facturapi");
+    return createPacHttpClient({
+      baseUrl,
+      apiKey,
+      ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+      ...(opts?.fetchImpl !== undefined ? { fetchImpl: opts.fetchImpl } : {}),
+    });
+  }
   return createPacMockClient();
 }
 
