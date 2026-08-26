@@ -357,19 +357,24 @@ export function createPacHttpClient(
       idempotencyKey: invoiceExternalId,
       body: invoiceBody,
     });
-    // Facturapi: si `is_ready_to_stamp === false`, faltan datos del
-    // receptor (dirección, CP, etc). Tratamos eso como
-    // `INVOICE_BUILD_INVALID` y extraemos diagnósticos estructurados
-    // (paths/codes/messages) sin filtrar PII ni secretos (intento 4).
+    // IMPL-20260825-36 (intento 6 · F-11 follow-up) · NO abortamos
+    // localmente sólo por `is_ready_to_stamp === false`. Antes el
+    // adapter cortaba aquí con `INVOICE_BUILD_INVALID` cuando el
+    // draft no estaba listo, lo que impedía al caller recibir la
+    // respuesta oficial del endpoint `/stamp` (que sí trae
+    // `errors[]`/`message` detallados cuando hay un problema
+    // real). Ahora dejamos que `POST /invoices/{id}/stamp` valide
+    // oficialmente y devuelva su 4xx detallado; sólo abortamos si
+    // `/stamp` NO es 2xx (protección contra éxito falso: no se
+    // descargan XML/PDF ni se muta la factura interna si el stamp
+    // falla).
+    //
+    // Mantenemos la observación local: si `is_ready_to_stamp ===
+    // false` lo guardamos en el log para diagnóstico (NO abort).
     if (draft.is_ready_to_stamp === false) {
-      const lines = extractFacturapiErrors(draft);
-      throw new DomainError(
-        "INVOICE_BUILD_INVALID",
-        formatDiagnostics(
-          "Facturapi: factura borrador no lista para timbrar",
-          lines,
-        ),
-        400,
+      log(
+        "warn",
+        `Facturapi: draft ${draft.id} no listo (is_ready_to_stamp=false); se intenta /stamp para diagnóstico oficial`,
       );
     }
     // 3) Stamp: POST /invoices/{id}/stamp. Si ya está timbrada,
@@ -543,6 +548,18 @@ async function throwFacturapiHttpError(
         `Facturapi 404 en ${method} ${path}: ${safeMsg}`,
         404,
       );
+    case 400: {
+      // IMPL-20260825-36 (intento 6) · 400 con `errors[]` detallado
+      // desde `/invoices/{id}/stamp` (caso típico: draft no listo
+      // por domicilio/cp/email faltante). Se proyecta el mismo
+      // diagnóstico estructurado que 409/422.
+      const diag = extractFacturapiErrors(parsed);
+      throw new DomainError(
+        "INVOICE_BUILD_INVALID",
+        formatDiagnostics(`Facturapi 400 en ${method} ${path}`, diag.length > 0 ? diag : [safeMsg]),
+        400,
+      );
+    }
     case 409: {
       const diag = extractFacturapiErrors(parsed);
       throw new DomainError(

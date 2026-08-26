@@ -1261,23 +1261,27 @@ describe("IMPL-20260825-36 · AC-1 · adaptador Facturapi v2 HTTP (ADR-20260825-
     expect(captured.length).toBe(0);
   });
 
-  it("is_ready_to_stamp=false → INVOICE_BUILD_INVALID sin llamar /stamp", async () => {
+  it("is_ready_to_stamp=true → /stamp se llama y descarga XML/PDF", async () => {
+    // IMPL-20260825-36 (intento 6 · F-11 follow-up) · El flujo feliz:
+    // /invoices con is_ready_to_stamp=true → /stamp → GET /xml + /pdf.
     const { fetchImpl, captured } = makeFetchMock([
       { status: 200, body: { id: "cust-1" } },
-      { status: 200, body: { id: "inv-1", is_ready_to_stamp: false } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-1", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
     ]);
     const pac = createPacHttpClient({
       baseUrl: "https://www.facturapi.io/v2",
       apiKey: "sk_test_abc",
       fetchImpl,
     });
-    await expect(pac.stamp(stampInputSample)).rejects.toMatchObject({
-      code: "INVOICE_BUILD_INVALID",
-    });
-    // No debe haberse llamado /stamp ni /xml ni /pdf (sólo customers
-    // y POST /invoices).
-    expect(captured.length).toBe(2);
-    expect(captured[1]?.url).toMatch(/\/invoices$/);
+    const result = await pac.stamp(stampInputSample);
+    expect(result.cfdiUuid).toBe("U-1");
+    expect(result.status).toBe("stamped");
+    // Se llamaron /customers, /invoices, /invoices/{id}/stamp, /xml, /pdf.
+    expect(captured.length).toBe(5);
+    expect(captured[2]?.url).toMatch(/\/invoices\/inv-1\/stamp$/);
   });
 
   it("acepta buffers CSD vacíos (Facturapi NO exige CSD local)", async () => {
@@ -1684,143 +1688,14 @@ describe("IMPL-20260825-36 · AC-4 · bypass BD HTTP + domicilio + error UI", ()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMPL-20260825-36 · AC-5 (intento 4 · QA V3 F-11) · Diagnóstico
-// estructurado de `is_ready_to_stamp=false` y de errores 4xx. La
-// respuesta completa se conserva sólo en memoria; extrae
-// `verification.errors[]` / `errors[]` / `message` y los proyecta en
-// un `DomainError(INVOICE_BUILD_INVALID)` sanitizado. Sin secretos
-// ni PII innecesaria.
+// estructurado de errores 4xx del PAC. La respuesta completa se
+// conserva sólo en memoria; extrae `verification.errors[]` /
+// `errors[]` / `message` y los proyecta en un
+// `DomainError(INVOICE_BUILD_INVALID)` sanitizado. Sin secretos ni
+// PII innecesaria.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("IMPL-20260825-36 · AC-5 · diagnóstico is_ready_to_stamp=false y errores 4xx", () => {
-  it("is_ready_to_stamp=false con verification.errors[] → incluye paths/codes/messages", async () => {
-    const { fetchImpl, captured } = makeFetchMock([
-      { status: 200, body: { id: "cust-1" } },
-      {
-        status: 200,
-        body: {
-          id: "inv-1",
-          is_ready_to_stamp: false,
-          verification: {
-            errors: [
-              {
-                source: "facturapi",
-                code: "required",
-                path: "customer.address.zip",
-                message: "Zip code is required",
-              },
-              {
-                source: "facturapi",
-                code: "required",
-                path: "customer.address.municipality",
-                message: "Municipality is required",
-              },
-            ],
-          },
-        },
-      },
-    ]);
-    const pac = createPacHttpClient({
-      baseUrl: "https://www.facturapi.io/v2",
-      apiKey: "sk_test_abc",
-      fetchImpl,
-    });
-    let captured_err: { message: string } | null = null;
-    try {
-      await pac.stamp(stampInputSample);
-    } catch (e) {
-      captured_err = e as { message: string };
-    }
-    expect(captured_err).not.toBeNull();
-    const msg = captured_err!.message;
-    // Cabecera genérica.
-    expect(msg).toContain("Facturapi: factura borrador no lista para timbrar");
-    // Paths extraídos.
-    expect(msg).toContain("customer.address.zip");
-    expect(msg).toContain("customer.address.municipality");
-    // Codes.
-    expect(msg).toContain("required");
-    // Mensajes.
-    expect(msg).toContain("Zip code is required");
-    expect(msg).toContain("Municipality is required");
-    // NO debe hacerse POST /stamp ni /xml ni /pdf.
-    expect(captured.length).toBe(2);
-    expect(captured[1]?.url).toMatch(/\/invoices$/);
-  });
-
-  it("is_ready_to_stamp=false NO filtra `sk_test_*` aunque aparezca en el body", async () => {
-    const { fetchImpl } = makeFetchMock([
-      { status: 200, body: { id: "cust-1" } },
-      {
-        status: 200,
-        body: {
-          id: "inv-1",
-          is_ready_to_stamp: false,
-          // Simula un path accidentado con un token (no debería
-          // pasar en producción pero la defensa es por si acaso).
-          verification: {
-            errors: [
-              {
-                source: "facturapi",
-                code: "auth",
-                path: "customer",
-                message:
-                  "auth failed using sk_test_supersecret1234567890abcdef",
-              },
-            ],
-          },
-        },
-      },
-    ]);
-    const pac = createPacHttpClient({
-      baseUrl: "https://www.facturapi.io/v2",
-      apiKey: "sk_test_other",
-      fetchImpl,
-    });
-    let captured_err: { message: string } | null = null;
-    try {
-      await pac.stamp(stampInputSample);
-    } catch (e) {
-      captured_err = e as { message: string };
-    }
-    expect(captured_err).not.toBeNull();
-    const msg = captured_err!.message;
-    // El token NO debe aparecer en el mensaje.
-    expect(msg).not.toContain("sk_test_supersecret1234567890abcdef");
-    expect(msg).toContain("MASKED");
-    // La apiKey propia tampoco debe aparecer (defensa por si el
-    // servicio filtra `message` accidentalmente con el header).
-    expect(msg).not.toContain("sk_test_other");
-  });
-
-  it("is_ready_to_stamp=false sin verification.errors → fallback al `message` top-level", async () => {
-    const { fetchImpl } = makeFetchMock([
-      { status: 200, body: { id: "cust-1" } },
-      {
-        status: 200,
-        body: {
-          id: "inv-1",
-          is_ready_to_stamp: false,
-          message: "El cliente no tiene un domicilio fiscal válido",
-        },
-      },
-    ]);
-    const pac = createPacHttpClient({
-      baseUrl: "https://www.facturapi.io/v2",
-      apiKey: "sk_test_abc",
-      fetchImpl,
-    });
-    let captured_err: { message: string } | null = null;
-    try {
-      await pac.stamp(stampInputSample);
-    } catch (e) {
-      captured_err = e as { message: string };
-    }
-    expect(captured_err).not.toBeNull();
-    const msg = captured_err!.message;
-    expect(msg).toContain("Facturapi: factura borrador no lista para timbrar");
-    expect(msg).toContain("El cliente no tiene un domicilio fiscal válido");
-  });
-
+describe("IMPL-20260825-36 · AC-5 · diagnóstico de errores 4xx (intento 4 + intento 6)", () => {
   it("422 con errors[] top-level → incluye paths/codes/messages", async () => {
     const { fetchImpl } = makeFetchMock([
       { status: 200, body: { id: "cust-1" } },
@@ -1885,24 +1760,169 @@ describe("IMPL-20260825-36 · AC-5 · diagnóstico is_ready_to_stamp=false y err
     expect(msg).toContain("MASKED");
   });
 
-  it("PII safety: el mensaje NO incluye valores de campos del receptor", async () => {
+  it("400 (sin errors[]) → fallback al message sanitizado", async () => {
     const { fetchImpl } = makeFetchMock([
+      {
+        status: 400,
+        body: {
+          message:
+            "Bad request: invalid token sk_test_supersecret1234567890abcdef",
+        },
+      },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    let captured_err: { message: string } | null = null;
+    try {
+      await pac.stamp(stampInputSample);
+    } catch (e) {
+      captured_err = e as { message: string };
+    }
+    expect(captured_err).not.toBeNull();
+    const msg = captured_err!.message;
+    expect(msg).toContain("Facturapi 400");
+    expect(msg).not.toContain("sk_test_supersecret1234567890abcdef");
+    expect(msg).toContain("MASKED");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-36 · AC-7 (intento 6 · F-11 follow-up) · El adapter
+// NO aborta localmente por `is_ready_to_stamp === false`; deja que
+// `POST /invoices/{id}/stamp` valide y devuelva su 4xx detallado.
+// Si el stamp NO es 2xx, NO descarga XML/PDF ni muta factura
+// interna (anti-éxito-falso).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-36 · AC-7 · dejar que /stamp valide (F-11 follow-up)", () => {
+  it("is_ready_to_stamp=false → /stamp se llama y devuelve 400 con detalle", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
       { status: 200, body: { id: "cust-1" } },
+      // /invoices devuelve 2xx pero is_ready_to_stamp=false (sin errors[]).
+      // El adapter NO aborta; sigue a /stamp.
       {
         status: 200,
         body: {
           id: "inv-1",
           is_ready_to_stamp: false,
-          verification: {
-            errors: [
-              {
-                source: "facturapi",
-                code: "required",
-                path: "customer.address.zip",
-                message: "Zip code is required",
-              },
-            ],
-          },
+        },
+      },
+      // /stamp devuelve 400 con errors[] detallado (campos
+      // faltantes: address.zip, address.municipality, etc).
+      {
+        status: 400,
+        body: {
+          message: "El cliente no tiene datos fiscales válidos",
+          errors: [
+            {
+              source: "facturapi",
+              code: "required",
+              path: "customer.address.zip",
+              message: "Zip code is required",
+            },
+            {
+              source: "facturapi",
+              code: "required",
+              path: "customer.address.municipality",
+              message: "Municipality is required",
+            },
+          ],
+        },
+      },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    let captured_err: { message: string } | null = null;
+    try {
+      await pac.stamp(stampInputSample);
+    } catch (e) {
+      captured_err = e as { message: string };
+    }
+    expect(captured_err).not.toBeNull();
+    const msg = captured_err!.message;
+    // Cabecera indica /stamp como origen (no /invoices).
+    expect(msg).toContain("Facturapi 400");
+    expect(msg).toMatch(/\/invoices\/[^/]+\/stamp/);
+    // Paths/codes/messages del body 400.
+    expect(msg).toContain("customer.address.zip");
+    expect(msg).toContain("customer.address.municipality");
+    expect(msg).toContain("required");
+    expect(msg).toContain("Zip code is required");
+    expect(msg).toContain("Municipality is required");
+    // NO debe haberse llamado /xml ni /pdf (protección éxito-falso).
+    const xmlReq = captured.find((r) => /\/xml$/.test(r.url));
+    const pdfReq = captured.find((r) => /\/pdf$/.test(r.url));
+    expect(xmlReq).toBeUndefined();
+    expect(pdfReq).toBeUndefined();
+    // Las llamadas fueron: customers, invoices, invoices/{id}/stamp.
+    expect(captured.length).toBe(3);
+    expect(captured[0]?.url).toMatch(/\/customers$/);
+    expect(captured[1]?.url).toMatch(/\/invoices$/);
+    expect(captured[2]?.url).toMatch(/\/invoices\/inv-1\/stamp$/);
+  });
+
+  it("/stamp 400 con `sk_test_*` accidental → enmascarado en mensaje", async () => {
+    const { fetchImpl } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: false } },
+      {
+        status: 400,
+        body: {
+          message:
+            "auth failure for sk_test_supersecret1234567890abcdef at customer",
+          errors: [
+            {
+              source: "facturapi",
+              code: "auth",
+              path: "customer",
+              message:
+                "auth failed with sk_test_supersecret1234567890abcdef",
+            },
+          ],
+        },
+      },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_other",
+      fetchImpl,
+    });
+    let captured_err: { message: string } | null = null;
+    try {
+      await pac.stamp(stampInputSample);
+    } catch (e) {
+      captured_err = e as { message: string };
+    }
+    expect(captured_err).not.toBeNull();
+    const msg = captured_err!.message;
+    // El token NO debe aparecer.
+    expect(msg).not.toContain("sk_test_supersecret1234567890abcdef");
+    expect(msg).toContain("MASKED");
+    // La apiKey propia tampoco.
+    expect(msg).not.toContain("sk_test_other");
+  });
+
+  it("/stamp 400 PII safety: NO incluye RFC/domicilio del receptor", async () => {
+    const { fetchImpl } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: false } },
+      {
+        status: 400,
+        body: {
+          errors: [
+            {
+              source: "facturapi",
+              code: "required",
+              path: "customer.address.zip",
+              message: "Zip code is required",
+            },
+          ],
         },
       },
     ]);
@@ -1918,31 +1938,27 @@ describe("IMPL-20260825-36 · AC-5 · diagnóstico is_ready_to_stamp=false y err
       captured_err = e as { message: string };
     }
     const msg = captured_err!.message;
-    // El snapshot del receptor en `stampInputSample` incluye RFC y
-    // domicilio exactos. Estos NO deben aparecer en el mensaje
-    // (sólo paths/codes/messages).
+    // El snapshot del receptor tiene valores reales. NO deben
+    // aparecer.
     expect(msg).not.toContain("XAXX010101000");
     expect(msg).not.toContain("Blvd. Atardecer");
     expect(msg).not.toContain("Huatabampo");
     expect(msg).not.toContain("Cliente Test SA");
   });
 
-  it("limita a 5 entradas para no desbordar el DomainError.message", async () => {
+  it("/stamp 400 limita a 5 entradas (no desborda DomainError.message)", async () => {
     const { fetchImpl } = makeFetchMock([
       { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: false } },
       {
-        status: 200,
+        status: 400,
         body: {
-          id: "inv-1",
-          is_ready_to_stamp: false,
-          verification: {
-            errors: Array.from({ length: 12 }).map((_, i) => ({
-              source: "facturapi",
-              code: `code_${i}`,
-              path: `customer.field_${i}`,
-              message: `Message ${i}`,
-            })),
-          },
+          errors: Array.from({ length: 12 }).map((_, i) => ({
+            source: "facturapi",
+            code: `code_${i}`,
+            path: `customer.field_${i}`,
+            message: `Message ${i}`,
+          })),
         },
       },
     ]);
@@ -1958,11 +1974,30 @@ describe("IMPL-20260825-36 · AC-5 · diagnóstico is_ready_to_stamp=false y err
       captured_err = e as { message: string };
     }
     const msg = captured_err!.message;
-    // Sólo 5 paths de los 12 originales aparecen.
     expect(msg).toContain("customer.field_0");
     expect(msg).toContain("customer.field_4");
     expect(msg).not.toContain("customer.field_5");
     expect(msg).not.toContain("customer.field_11");
+  });
+
+  it("is_ready_to_stamp=true → /stamp 2xx → continúa con UUID/XML/PDF", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 200, body: { id: "inv-1", is_ready_to_stamp: true } },
+      { status: 200, body: { id: "inv-1", uuid: "U-OK", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    const result = await pac.stamp(stampInputSample);
+    expect(result.cfdiUuid).toBe("U-OK");
+    expect(result.status).toBe("stamped");
+    // Flujo completo: customers, invoices, stamp, xml, pdf.
+    expect(captured.length).toBe(5);
   });
 });
 
