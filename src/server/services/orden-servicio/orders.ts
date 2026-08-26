@@ -28,7 +28,7 @@
  *    IMPL-REPORT. La interfaz garantiza que, cuando SPEC-008/011
  *    publique el dato, no se requieran cambios en SPEC-004.
  */
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, withTx } from "@/server/db/client";
 import {
   clients,
@@ -901,9 +901,66 @@ export function createOrdersService(
         0,
         before.soldTotalCents - totalPaidCents,
       );
+      // IMPL-20260825-38 (B-5) · backfill idempotente del flag
+      // `finalInvoiceIssued` para OS timbradas/pagadas antes del
+      // deploy que añadió el side-effect en `facturacion.timbrar`.
+      // Si el flag está en `false` y existe al menos una factura del
+      // `orderId` con `status` válido (`emitida`, `pagada`,
+      // `parcialmente_pagada` o `vencida`), lo activamos aquí, en la
+      // misma transacción. `borrador` y `cancelada` NO desbloquean.
+      // Idempotente por construcción: un UPDATE de `false → true` es
+      // un cambio material; subsiguientes lecturas ya ven `true` y el
+      // `if (!before.finalInvoiceIssued)` es falso. Audit explícito
+      // `os.final_invoice_issued` para trazabilidad post-backfill.
+      let finalInvoiceIssued = before.finalInvoiceIssued;
+      if (!finalInvoiceIssued) {
+        const backfillRows = await tx
+          .select({ id: invoices.id, status: invoices.status })
+          .from(invoices)
+          .where(
+            and(
+              eq(invoices.organizationId, user.organization_id),
+              eq(invoices.orderId, before.id),
+              inArray(invoices.status, [
+                "emitida",
+                "pagada",
+                "parcialmente_pagada",
+                "vencida",
+              ]),
+            ),
+          )
+          .limit(1);
+        if (backfillRows.length > 0) {
+          await tx
+            .update(orders)
+            .set({ finalInvoiceIssued: true })
+            .where(
+              and(
+                eq(orders.id, before.id),
+                eq(orders.organizationId, user.organization_id),
+              ),
+            );
+          finalInvoiceIssued = true;
+          const { createAuditService: auditForBackfill } = await import(
+            "@/server/services/audit"
+          );
+          await auditForBackfill().record(ctx, {
+            entityType: "order",
+            entityId: before.id,
+            action: "os.final_invoice_issued",
+            before: { finalInvoiceIssued: false },
+            after: {
+              finalInvoiceIssued: true,
+              source: "backfill_on_close",
+              invoiceId: backfillRows[0]!.id,
+              invoiceStatus: backfillRows[0]!.status,
+            },
+          });
+        }
+      }
       const evaluation = evaluateCloseAdministrative({
         outstandingBalanceCents,
-        finalInvoiceIssued: before.finalInvoiceIssued,
+        finalInvoiceIssued,
         directorException,
       });
       if (!evaluation.ok) {
@@ -952,6 +1009,7 @@ export function createOrdersService(
           closedAt: after.closedAt,
           closedBalanceCents: after.closedBalanceCents,
           closedDirectorException: after.closedDirectorException,
+          finalInvoiceIssued: after.finalInvoiceIssued,
         },
         ...(ctx.actorRoleCode !== undefined ? { actorRoleCode: ctx.actorRoleCode } : {}),
       });

@@ -609,3 +609,102 @@ describe("IMPL-20260825-38 · B-4 · saldo de cierre desde invoices.paidCents", 
     expect(r.ok).toBe(true);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-38 (B-5) · backfill idempotente de
+// `orders.finalInvoiceIssued` para OS con factura pre-deploy
+// (timbrada/pagada antes del side-effect). Sin endpoint nuevo, sin
+// migración; sólo cambia el camino de `closeAdministrative`.
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-38 (B-5) · backfill idempotente de finalInvoiceIssued", () => {
+  it("orders.ts: closeAdministrative consulta facturas con status válido para backfill", async () => {
+    const src = await readFile(
+      "src/server/services/orden-servicio/orders.ts",
+      "utf8",
+    );
+    // Ancla estable: comentario canónico B-5.
+    const block = src.match(
+      /IMPL-20260825-38 \(B-5\)[\s\S]*?let finalInvoiceIssued = before\.finalInvoiceIssued;[\s\S]*?source: "backfill_on_close"/,
+    );
+    expect(block).not.toBeNull();
+    // Filtra por los 4 estados válidos (borrador/cancelada NO desbloquean).
+    expect(/inArray\(invoices\.status, \[/.test(block![0])).toBe(true);
+    expect(/"emitida"/.test(block![0])).toBe(true);
+    expect(/"pagada"/.test(block![0])).toBe(true);
+    expect(/"parcialmente_pagada"/.test(block![0])).toBe(true);
+    expect(/"vencida"/.test(block![0])).toBe(true);
+    // `borrador` y `cancelada` explícitamente excluidos.
+    expect(/"borrador"/.test(block![0])).toBe(false);
+    expect(/"cancelada"/.test(block![0])).toBe(false);
+    // Acota por `orderId` y `organizationId`.
+    expect(/eq\(invoices\.orderId, before\.id\)/.test(block![0])).toBe(true);
+    expect(/eq\(invoices\.organizationId, user\.organization_id\)/.test(block![0])).toBe(true);
+  });
+  it("orders.ts: backfill emite audit `os.final_invoice_issued` con `source: backfill_on_close`", async () => {
+    const src = await readFile(
+      "src/server/services/orden-servicio/orders.ts",
+      "utf8",
+    );
+    // El audit del backfill debe estar dentro del bloque condicional
+    // y distinguir el origen (`backfill_on_close`) del side-effect
+    // de `timbrar` (sin `source`).
+    expect(src).toMatch(
+      /action:\s*"os\.final_invoice_issued"[\s\S]*?source:\s*"backfill_on_close"[\s\S]*?invoiceId:\s*backfillRows\[0\]!\.id[\s\S]*?invoiceStatus:\s*backfillRows\[0\]!\.status/,
+    );
+  });
+  it("orders.ts: el helper puro con `finalInvoiceIssued=true` aprueba el cierre normal (saldo=0)", () => {
+    // Caso QA V3: F-00005 fue timbrada/pagada pre-deploy, OS-00001
+    // saldo=0 pero flag stale=false; tras backfill → flag=true ⇒
+    // cierre normal sin excepción. Cierre: closedBalanceCents=0.
+    const r = evaluateCloseAdministrative({
+      outstandingBalanceCents: 0,
+      finalInvoiceIssued: true, // post-backfill
+      directorException: false,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) expect(r.errors).not.toContain("FINAL_INVOICE_REQUIRED");
+    if (!r.ok) expect(r.errors).not.toContain("OUTSTANDING_BALANCE");
+  });
+  it("orders.ts: el helper puro con `finalInvoiceIssued=false` rechaza el cierre normal (sin backfill)", () => {
+    // Caso opuesto: sólo hay factura `borrador` o `cancelada`; el
+    // backfill no aplica; el cierre debe seguir exigiendo factura
+    // final.
+    const r = evaluateCloseAdministrative({
+      outstandingBalanceCents: 0,
+      finalInvoiceIssued: false,
+      directorException: false,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors).toContain("FINAL_INVOICE_REQUIRED");
+  });
+  it("orders.ts: backfill es idempotente (segundo cierre con flag ya en true no re-ejecuta UPDATE)", async () => {
+    const src = await readFile(
+      "src/server/services/orden-servicio/orders.ts",
+      "utf8",
+    );
+    // La guarda `if (!finalInvoiceIssued)` precede la consulta de
+    // backfill: cuando el flag ya está en true, NO se ejecuta la
+    // consulta adicional (idempotencia por construcción).
+    const guard = src.match(
+      /let finalInvoiceIssued = before\.finalInvoiceIssued;[\s\S]*?if \(!finalInvoiceIssued\)/,
+    );
+    expect(guard).not.toBeNull();
+    // El UPDATE está dentro del `if (!finalInvoiceIssued)`, no afuera.
+    const updateBlock = src.match(
+      /if \(!finalInvoiceIssued\)[\s\S]*?update\(orders\)[\s\S]*?finalInvoiceIssued: true[\s\S]*?auditForBackfill/,
+    );
+    expect(updateBlock).not.toBeNull();
+  });
+  it("orders.ts: cierre normal (post-backfill) persiste `closedBalanceCents=0`", () => {
+    // Defensa documental: el helper NO rechaza un cierre normal con
+    // saldo cero, lo que resulta en `closedBalanceCents=0` al
+    // persistirse en el UPDATE del cierre.
+    const r = evaluateCloseAdministrative({
+      outstandingBalanceCents: 0,
+      finalInvoiceIssued: true,
+      directorException: false,
+    });
+    expect(r.ok).toBe(true);
+  });
+});
