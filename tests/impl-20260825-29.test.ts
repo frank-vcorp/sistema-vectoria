@@ -259,8 +259,12 @@ describe("IMPL-20260825-29 · AC-3 · bloque de éxito con datos reales del proy
   });
 
   it("`onSuccess` invalida `proyectos.byId`, `proyectos.list` y `ordenServicio.byId`", () => {
+    // Apuntamos específicamente al `onSuccess` de `createProject` (no
+    // al primer `async onSuccess` del archivo) para que el test sea
+    // robusto ante futuras adiciones como el `onSuccess` de
+    // `markInExecution` (IMPL-20260825-32).
     const successHandler = detail.match(
-      /onSuccess:\s*async\s*\([\s\S]*?\},\s*\}\)/,
+      /createProject[\s\S]{0,40}onSuccess:\s*async\s*\([\s\S]*?\},\s*\}\)/,
     );
     expect(successHandler).not.toBeNull();
     expect(/utils\.proyectos\.byId\.invalidate/.test(successHandler![0])).toBe(

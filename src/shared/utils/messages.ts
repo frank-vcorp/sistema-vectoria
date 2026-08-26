@@ -311,6 +311,34 @@ export const messages = {
       "No tienes permisos para crear proyectos (gestionar_proyectos).",
     createProjectErrorGeneric:
       "No fue posible crear el proyecto a partir de la OS.",
+    // IMPL-20260825-32 · Transición manual `authorized_to_start → in_execution`
+    // (SPEC-20260817-004 BR-N247 + SPEC-20260817-005 AC §4.3 gap). Se expone
+    // como acción del PL/Director mientras el orquestador que consume
+    // `os.authorized_to_start` no esté disponible (gap entre SPEC-004 y
+    // SPEC-005, sin acoplamiento backend OS↔Proyecto). Sólo visible cuando
+    // `o.status === "authorized_to_start"`; en cualquier otro estado la UI
+    // NO muestra acción falsa. El PL se conserva; el handler envía el UUID
+    // real de la OS (`o.id`) con `manual: true` para usar el permiso
+    // `autorizar_os` (no `gestionar_ordenes_servicio`). En éxito invalida
+    // `byId` y `preflightAuthorize`; el botón desaparece porque el bloque
+    // padre está condicionado al estado previo. Sin prompt() ni acceso
+    // directo a BD.
+    markInExecutionTitle: "Marcar en ejecución",
+    markInExecutionSubtitle:
+      "Transición manual OS `authorized_to_start → in_execution`. Se ejecuta una sola vez; el botón desaparece tras el éxito.",
+    markInExecutionAction: "Marcar en ejecución",
+    markInExecutionSubmitting: "Marcando en ejecución…",
+    markInExecutionHelp:
+      "Sólo se muestra cuando la OS está en `authorized_to_start`. En cualquier otro estado no se ofrece acción.",
+    markInExecutionSuccessTitle: "OS en ejecución",
+    markInExecutionSuccessBody:
+      "La OS {code} pasó a estado `in_execution`. Ya puedes aplicar cierre técnico y administrativo.",
+    markInExecutionErrorTransition:
+      "La OS ya no admite esta transición (no está en `authorized_to_start`); refresca el detalle.",
+    markInExecutionErrorForbidden:
+      "No tienes permisos para marcar la OS en ejecución (autorizar_os).",
+    markInExecutionErrorGeneric:
+      "No fue posible marcar la OS en ejecución.",
   },
   cuestionarios: {
     title: "Cuestionarios",

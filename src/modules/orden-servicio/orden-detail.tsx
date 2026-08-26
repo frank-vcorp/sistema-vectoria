@@ -74,6 +74,55 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
   const markDelivered = trpc.ordenServicio.markDelivered.useMutation({
     onSuccess: () => utils.ordenServicio.byId.invalidate({ orderId: id }),
   });
+  // IMPL-20260825-32 · Transición manual OS `authorized_to_start → in_execution`
+  // (SPEC-20260817-004 BR-N247 + gap SPEC-005 AC §4.3). Se expone como acción
+  // del PL/Director mientras el orquestador de SPEC-005 que consume el
+  // evento `os.authorized_to_start` no esté disponible, sin acoplamiento
+  // backend OS↔Proyecto. El handler envía `manual: true` para que el
+  // servicio use el permiso `autorizar_os` (no `gestionar_ordenes_servicio`).
+  // En éxito invalida `byId` y `preflightAuthorize`; el Card padre está
+  // condicionado a `o.status === "authorized_to_start"`, de modo que tras
+  // el refetch el botón desaparece sin acción manual del usuario.
+  const markInExecution = trpc.ordenServicio.markInExecution.useMutation({
+    onSuccess: async () => {
+      setMarkInExecutionError(null);
+      setMarkInExecutionSuccess(true);
+      await Promise.all([
+        utils.ordenServicio.byId.invalidate({ orderId: id }),
+        utils.ordenServicio.preflightAuthorize.invalidate({ orderId: id }),
+      ]);
+    },
+    onError: (err) => {
+      setMarkInExecutionSuccess(false);
+      const code = err.data?.code ?? null;
+      // Códigos de transición inválida (helper `canTransitionTo`):
+      // ORDER_NOT_AUTHORIZABLE / ORDER_ALREADY_AUTHORIZED /
+      // ORDER_ALREADY_CLOSED / ORDER_ALREADY_CANCELLED / ORDER_NOT_PAUSED.
+      // El handoff menciona `ORDER_INVALID_TRANSITION` como nombre genérico;
+      // mapeamos el clúster completo para no ligar la UI a un solo código.
+      if (
+        code === "ORDER_NOT_AUTHORIZABLE" ||
+        code === "ORDER_ALREADY_AUTHORIZED" ||
+        code === "ORDER_ALREADY_CLOSED" ||
+        code === "ORDER_ALREADY_CANCELLED" ||
+        code === "ORDER_NOT_PAUSED"
+      ) {
+        setMarkInExecutionError(messages.ordenes.markInExecutionErrorTransition);
+        return;
+      }
+      if (code === "FORBIDDEN" || code === "UNAUTHORIZED") {
+        setMarkInExecutionError(messages.ordenes.markInExecutionErrorForbidden);
+        return;
+      }
+      if (code === "ORDER_NOT_FOUND") {
+        setMarkInExecutionError(messages.errors.notFound);
+        return;
+      }
+      setMarkInExecutionError(
+        err.message ?? messages.ordenes.markInExecutionErrorGeneric,
+      );
+    },
+  });
   const closeAdmin = trpc.ordenServicio.closeAdministrative.useMutation({
     onSuccess: () => utils.ordenServicio.byId.invalidate({ orderId: id }),
   });
@@ -146,6 +195,16 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
     | null
   >(null);
   const [createProjectError, setCreateProjectError] = React.useState<
+    string | null
+  >(null);
+  // IMPL-20260825-32 · Estado local de `markInExecution`. `success` se
+  // conserva sólo en memoria para mostrar feedback `role="status"` entre
+  // el `onSuccess` y la siguiente invalidación/refetch de `byId`; al
+  // re-renderizar, el padre vuelve a evaluar `o.status` y la acción
+  // desaparece porque el Card está condicionado al estado previo.
+  const [markInExecutionSuccess, setMarkInExecutionSuccess] =
+    React.useState(false);
+  const [markInExecutionError, setMarkInExecutionError] = React.useState<
     string | null
   >(null);
 
@@ -374,6 +433,78 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
           ) : null}
         </CardContent>
       </Card>
+
+      {/* IMPL-20260825-32 · Marcar OS en ejecución (transición manual
+          `authorized_to_start → in_execution`, SPEC-20260817-004 BR-N247).
+          Sólo se renderiza cuando `o.status === "authorized_to_start"`;
+          en cualquier otro estado la UI NO muestra acción falsa (ni
+          siquiera si `markInExecutionSuccess=true` mientras el refetch
+          de `byId` aún no llegó: el Card desaparece en el siguiente
+          render cuando `o.status` ya es `in_execution`). El handler
+          envía el UUID real de la OS (`o.id`) con `manual: true` (permiso
+          `autorizar_os`); NO pide un UUID manual ni abre `window.prompt`.
+          En éxito invalida `byId` y `preflightAuthorize`; el botón
+          desaparece sin acción manual del usuario. */}
+      {o.status === "authorized_to_start" ? (
+        <Card data-testid="orden-detail-mark-in-execution">
+          <CardHeader>
+            <CardTitle>{messages.ordenes.markInExecutionTitle}</CardTitle>
+            <CardDescription>
+              {messages.ordenes.markInExecutionSubtitle}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-xs text-muted-foreground">
+              {messages.ordenes.markInExecutionHelp}
+            </p>
+            <Button
+              type="button"
+              onClick={() => {
+                setMarkInExecutionError(null);
+                setMarkInExecutionSuccess(false);
+                if (markInExecution.isPending || markInExecutionSuccess) return;
+                // `orderId` es el UUID real de la OS (`o.id`); `manual: true`
+                // para usar el permiso `autorizar_os` (gap SPEC-004↔SPEC-005).
+                markInExecution.mutate({ orderId: o.id, manual: true });
+              }}
+              disabled={markInExecution.isPending || markInExecutionSuccess}
+              aria-busy={markInExecution.isPending ? true : undefined}
+              data-testid="orden-detail-mark-in-execution-action"
+            >
+              {markInExecution.isPending
+                ? messages.ordenes.markInExecutionSubmitting
+                : messages.ordenes.markInExecutionAction}
+            </Button>
+            {markInExecutionError ? (
+              <p
+                role="alert"
+                className="text-sm text-destructive"
+                data-testid="orden-detail-mark-in-execution-error"
+              >
+                {markInExecutionError}
+              </p>
+            ) : null}
+            {markInExecutionSuccess ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mt-2 rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900"
+                data-testid="orden-detail-mark-in-execution-success"
+              >
+                <p className="font-medium">
+                  {messages.ordenes.markInExecutionSuccessTitle}
+                </p>
+                <p className="mt-1">
+                  {messages.ordenes.markInExecutionSuccessBody.replace(
+                    "{code}",
+                    o.code,
+                  )}
+                </p>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* IMPL-20260825-29 · Crear Proyecto desde OS autorizada
           (SPEC-20260817-005 · project_creation universal, BR-N407).
