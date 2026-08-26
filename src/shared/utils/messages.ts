@@ -978,6 +978,23 @@ export const messages = {
     empty: "Sin cobros registrados",
     new: "Registrar cobro",
     register: "Registrar",
+    registerTitle: "Registrar cobro (alta)",
+    registerSubmitting: "Registrando…",
+    registerSuccess: "Cobro registrado y aplicado a la factura.",
+    registerAmountMXN: "Importe (MXN)",
+    registerAmountHelp:
+      "Captura el importe en pesos; se convierte a centavos al enviar.",
+    registerClientId: "Cliente (UUID)",
+    registerInvoiceId: "Factura a aplicar (UUID)",
+    registerPaymentDateHelp: "Fecha en formato YYYY-MM-DD (default: hoy).",
+    registerUuidInvalid: "UUID inválido (8-4-4-4-12 hex).",
+    registerAmountInvalid: "Importe debe ser número positivo.",
+    registerInvoiceRequired:
+      "La factura es obligatoria para confirmar el cobro; captura su UUID.",
+    registerAmountExceedsSaldo:
+      "El importe excede el saldo pendiente de la factura.",
+    registerSubmitBothError:
+      "Cobro registrado, pero la aplicación a factura falló: ",
     update: "Editar",
     confirm: "Confirmar",
     reverse: "Reversar",

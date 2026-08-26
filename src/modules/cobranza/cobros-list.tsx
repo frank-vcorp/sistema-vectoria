@@ -3,6 +3,7 @@
 import * as React from "react";
 import { trpc } from "@/lib/trpc";
 import { messages } from "@/shared/utils";
+import { PAYMENT_METHODS, type PaymentMethod } from "@/shared/enums";
 
 /**
  * Listado de cobros (SPEC-008 AC-10): `registrado | confirmado |
@@ -19,6 +20,7 @@ export function CobrosList() {
   const [page, setPage] = React.useState({ limit: 20, offset: 0 });
   const [statusFilter, setStatusFilter] = React.useState<string>("");
   const [reverseOpen, setReverseOpen] = React.useState<string | null>(null);
+  const [registerOpen, setRegisterOpen] = React.useState(false);
 
   const list = trpc.cobranza.cobros.list.useQuery({
     ...page,
@@ -46,6 +48,17 @@ export function CobrosList() {
             ))}
           </select>
         </div>
+        {/* IMPL-20260825-37 · SPEC-008 AC-1/AC-11 · Alta de cobro
+            desde la lista. Completa el camino existente (backend
+            `cobros.register`+`confirm` ya operativos). */}
+        <button
+          type="button"
+          onClick={() => setRegisterOpen(true)}
+          data-testid="cobros-list-register-open"
+          className="rounded-md border bg-primary px-3 py-1 text-sm text-primary-foreground hover:bg-primary/90"
+        >
+          {messages.cobranza.new}
+        </button>
       </div>
 
       <div className="overflow-x-auto rounded-md border">
@@ -127,6 +140,9 @@ export function CobrosList() {
           paymentId={reverseOpen}
           onClose={() => setReverseOpen(null)}
         />
+      ) : null}
+      {registerOpen ? (
+        <RegisterCobroDialog onClose={() => setRegisterOpen(false)} />
       ) : null}
     </div>
   );
@@ -224,6 +240,280 @@ function ReverseDialog({
             className="rounded-md bg-destructive px-3 py-1 text-sm text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
           >
             {messages.cobranza.reverse}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * IMPL-20260825-37 · SPEC-008 AC-1/AC-11 · Modal responsive para
+ * registrar un cobro + aplicarlo a una factura en una sola
+ * acción. El backend ya provee `cobros.register` y
+ * `cobros.confirm`; esta UI sólo orquesta el camino existente.
+ *
+ * Submit:
+ *  1. `cobranza.cobros.register({ clientId, amountCents, method,
+ *     reference?, paymentDate })` → `paymentId`
+ *  2. Si (1) responde 2xx, se llama
+ *     `cobranza.cobros.confirm({ paymentId, applications:
+ *     [{ invoiceId, amountCents }] })`.
+ *  3. Sólo tras AMBAS respuestas 2xx se invalida la lista y se
+ *     cierra el modal. Si cualquier paso falla, el modal queda
+ *     abierto y el error se muestra en `role="alert"`.
+ *
+ * Validación cliente:
+ *  - `clientId` y `invoiceId` son UUIDs válidos (regex).
+ *  - `amountCents` se deriva de `amountMXN` (positivos, en
+ *    pesos); se convierte a centavos al enviar.
+ *  - `paymentDate` formato `YYYY-MM-DD` (default hoy).
+ *  - `method` ∈ `PAYMENT_METHODS` (enum cerrado).
+ *
+ * Errores del backend (incluido "amount > saldo") se
+ * proyectan sin filtrar — la UI sólo añade el `role="alert"`.
+ */
+function RegisterCobroDialog({ onClose }: { onClose: () => void }) {
+  const utils = trpc.useUtils();
+  const [clientId, setClientId] = React.useState("");
+  const [invoiceId, setInvoiceId] = React.useState("");
+  const [amountMXN, setAmountMXN] = React.useState("");
+  const [method, setMethod] = React.useState<PaymentMethod>(
+    PAYMENT_METHODS[0],
+  );
+  const [reference, setReference] = React.useState("");
+  const [paymentDate, setPaymentDate] = React.useState(() => {
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    return d.toISOString().slice(0, 10);
+  });
+  const [submitError, setSubmitError] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+
+  // UUIDv4 (8-4-4-4-12 hex). Acepta cualquier UUID variante.
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  // YYYY-MM-DD.
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+
+  const amountCents = (() => {
+    const n = Number(amountMXN);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.round(n * 100);
+  })();
+
+  const validation = (() => {
+    if (!uuidRe.test(clientId)) {
+      return messages.cobranza.registerUuidInvalid;
+    }
+    if (!uuidRe.test(invoiceId)) {
+      return messages.cobranza.registerInvoiceRequired;
+    }
+    if (amountCents === null || amountCents <= 0) {
+      return messages.cobranza.registerAmountInvalid;
+    }
+    if (!dateRe.test(paymentDate)) {
+      return messages.cobranza.registerPaymentDateHelp;
+    }
+    return null;
+  })();
+  const fieldError = validation;
+  const canSubmit = fieldError === null && !submitting;
+
+  const register = trpc.cobranza.cobros.register.useMutation();
+  const confirm = trpc.cobranza.cobros.confirm.useMutation();
+
+  async function onSubmit() {
+    if (fieldError !== null || amountCents === null || submitting) return;
+    setSubmitError(null);
+    setSubmitting(true);
+    try {
+      // 1) register
+      const created = await register.mutateAsync({
+        clientId: clientId.trim(),
+        amountCents,
+        method,
+        paymentDate,
+        ...(reference.trim() ? { reference: reference.trim() } : {}),
+      });
+      const paymentId = created.id;
+      // 2) confirm con aplicaciones (atómico desde la UI)
+      try {
+        await confirm.mutateAsync({
+          paymentId,
+          applications: [{ invoiceId: invoiceId.trim(), amountCents }],
+        });
+        // Sólo tras AMBAS 2xx cerramos + invalidamos.
+        await utils.cobranza.cobros.list.invalidate();
+        setRegisterOpen(false);
+        onClose();
+        return;
+      } catch (confirmErr) {
+        // El cobro YA está registrado; informamos que la
+        // aplicación falló sin fingir éxito.
+        const msg =
+          confirmErr instanceof Error
+            ? confirmErr.message
+            : messages.cobranza.empty;
+        setSubmitError(`${messages.cobranza.registerSubmitBothError}${msg}`);
+      }
+    } catch (regErr) {
+      const msg =
+        regErr instanceof Error ? regErr.message : messages.cobranza.empty;
+      setSubmitError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Estado local para evitar el warning de "setRegisterOpen not
+  // defined" — usamos onClose para que el padre controle el ciclo.
+  function setRegisterOpen(open: boolean) {
+    if (!open) onClose();
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={messages.cobranza.registerTitle}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+      data-testid="cobros-list-register-dialog"
+    >
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-lg bg-background p-6 shadow-xl sm:rounded-lg">
+        <h2 className="mb-1 text-lg font-bold">
+          {messages.cobranza.registerTitle}
+        </h2>
+        <p className="mb-4 text-xs text-muted-foreground">
+          {messages.cobranza.registerAmountHelp}
+        </p>
+        <div className="space-y-3 text-sm">
+          <label className="block">
+            <span className="block text-muted-foreground">
+              {messages.cobranza.registerClientId}
+            </span>
+            <input
+              id="cobros-list-register-clientId"
+              data-testid="cobros-list-register-clientId"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value.trim())}
+              placeholder="00000000-0000-0000-0000-000000000000"
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1 font-mono"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-muted-foreground">
+              {messages.cobranza.registerInvoiceId}
+            </span>
+            <input
+              id="cobros-list-register-invoiceId"
+              data-testid="cobros-list-register-invoiceId"
+              value={invoiceId}
+              onChange={(e) => setInvoiceId(e.target.value.trim())}
+              placeholder="00000000-0000-0000-0000-000000000000"
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1 font-mono"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-muted-foreground">
+              {messages.cobranza.registerAmountMXN}
+            </span>
+            <input
+              id="cobros-list-register-amount"
+              data-testid="cobros-list-register-amount"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.01"
+              value={amountMXN}
+              onChange={(e) => setAmountMXN(e.target.value)}
+              placeholder="0.00"
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1 font-mono"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-muted-foreground">
+              {messages.cobranza.method}
+            </span>
+            <select
+              id="cobros-list-register-method"
+              data-testid="cobros-list-register-method"
+              value={method}
+              onChange={(e) => setMethod(e.target.value as PaymentMethod)}
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1"
+            >
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {messages.cobranza.methodLabel[m]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="block text-muted-foreground">
+              {messages.cobranza.reference}
+            </span>
+            <input
+              id="cobros-list-register-reference"
+              data-testid="cobros-list-register-reference"
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+              placeholder={messages.cobranza.reference}
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-muted-foreground">
+              {messages.cobranza.paymentDate}
+            </span>
+            <input
+              id="cobros-list-register-paymentDate"
+              data-testid="cobros-list-register-paymentDate"
+              type="date"
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+              className="mt-1 w-full rounded-md border bg-background px-2 py-1"
+            />
+          </label>
+          {fieldError !== null ? (
+            <p
+              role="alert"
+              className="text-xs text-destructive"
+              data-testid="cobros-list-register-field-error"
+            >
+              {fieldError}
+            </p>
+          ) : null}
+          {submitError !== null ? (
+            <p
+              role="alert"
+              className="text-xs text-destructive"
+              data-testid="cobros-list-register-submit-error"
+            >
+              {submitError}
+            </p>
+          ) : null}
+        </div>
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            data-testid="cobros-list-register-cancel"
+            className="rounded-md border bg-card px-3 py-1 text-sm hover:bg-accent disabled:opacity-50"
+          >
+            Cerrar
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={!canSubmit}
+            aria-busy={submitting ? true : undefined}
+            data-testid="cobros-list-register-submit"
+            className="rounded-md bg-primary px-3 py-1 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {submitting
+              ? messages.cobranza.registerSubmitting
+              : messages.cobranza.register}
           </button>
         </div>
       </div>

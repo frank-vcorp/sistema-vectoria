@@ -17,6 +17,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   BASE_PERMISSIONS,
   COLLECTION_ACTIVITY_TYPES,
@@ -577,5 +578,164 @@ describe("SPEC-008 · AC-11 · UI responsive (grep)", () => {
     expect(src).toContain("cobros");
     expect(src).toContain("cobranza");
     expect(src).toContain("comisiones");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-37 · SPEC-008 AC-1/AC-11 · UI mínima de alta de
+// cobro en `cobros-list.tsx`. El backend (`cobros.register` +
+// `cobros.confirm`) ya existía; estos tests verifican que la UI:
+//  - expone el botón `Registrar cobro`,
+//  - abre un dialog responsive con los campos canónicos,
+//  - valida cliente (UUID, amount>0, fecha YYYY-MM-DD),
+//  - orquesta register → confirm con `applications` en orden,
+//  - no cierra el modal si cualquier paso falla,
+//  - muestra errores con `role="alert"`,
+//  - convierte MXN → centavos al enviar.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-37 · AC-9 · UI alta de cobro en cobros-list", () => {
+  it("expone botón visible `Registrar cobro` con `data-testid` canónico", async () => {
+    const src = await readFile(
+      path.resolve(__dirname, "../src/modules/cobranza/cobros-list.tsx"),
+      "utf8",
+    );
+    // Botón que abre el dialog.
+    expect(src).toContain('data-testid="cobros-list-register-open"');
+    // Etiqueta humana reutilizada del catálogo canónico.
+    expect(src).toContain("messages.cobranza.new");
+  });
+
+  it("dialog responsive con `role=\"dialog\"`, `aria-modal` y campos requeridos", async () => {
+    const src = await readFile(
+      path.resolve(__dirname, "../src/modules/cobranza/cobros-list.tsx"),
+      "utf8",
+    );
+    expect(src).toContain('role="dialog"');
+    expect(src).toContain('aria-modal="true"');
+    expect(src).toContain('aria-label={messages.cobranza.registerTitle}');
+    // 6 campos: clientId, invoiceId, amount, method, reference
+    // (opcional), paymentDate.
+    for (const id of [
+      "cobros-list-register-clientId",
+      "cobros-list-register-invoiceId",
+      "cobros-list-register-amount",
+      "cobros-list-register-method",
+      "cobros-list-register-reference",
+      "cobros-list-register-paymentDate",
+    ]) {
+      expect(src).toContain(`data-testid="${id}"`);
+    }
+    // Responsive: `items-end`/`sm:items-center` (mismo patrón
+    // que `ReverseDialog` existente en el archivo).
+    expect(src).toMatch(/items-end[\s\S]*?sm:items-center/);
+  });
+
+  it("validación cliente: UUID inválido, amount inválido, fecha inválida", async () => {
+    const src = await readFile(
+      path.resolve(__dirname, "../src/modules/cobranza/cobros-list.tsx"),
+      "utf8",
+    );
+    // Regex UUIDv4/variant tolerante (8-4-4-4-12 hex): basta con
+    // verificar que el regex literal aparece con sus cuantificadores.
+    expect(src).toContain("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+    // Mensajes canónicos.
+    expect(src).toContain("messages.cobranza.registerUuidInvalid");
+    expect(src).toContain("messages.cobranza.registerAmountInvalid");
+    expect(src).toContain("messages.cobranza.registerInvoiceRequired");
+    // Errores visibles con role="alert" y data-testid
+    expect(src).toContain('role="alert"');
+    expect(src).toContain('data-testid="cobros-list-register-field-error"');
+    expect(src).toContain('data-testid="cobros-list-register-submit-error"');
+  });
+
+  it("envía amountCents (centavos) y NO MXN crudo", async () => {
+    const src = await readFile(
+      path.resolve(__dirname, "../src/modules/cobranza/cobros-list.tsx"),
+      "utf8",
+    );
+    // Conversión MXN → centavos en el submit.
+    expect(/Math\.round\(n\s*\*\s*100\)/.test(src)).toBe(true);
+    // El input captura MXN (string libre) y la mutación envía
+    // `amountCents` (number), no `amount` ni `amountMXN`.
+    expect(/amountCents/.test(src)).toBe(true);
+    expect(/amountMXN/.test(src)).toBe(true);
+    expect(/mutateAsync[\s\S]*?amountCents[\s\S]*?method/.test(src)).toBe(true);
+    // El método se toma de la lista cerrada (no string libre).
+    expect(/PAYMENT_METHODS\.map/.test(src)).toBe(true);
+  });
+
+  it("secuencia: `register` → `confirm` con `applications` (sólo si register 2xx)", async () => {
+    const src = await readFile(
+      path.resolve(__dirname, "../src/modules/cobranza/cobros-list.tsx"),
+      "utf8",
+    );
+    // mutateAsync(register) → mutateAsync(confirm con applications).
+    expect(
+      /register\.mutateAsync[\s\S]*?created\.id/.test(src),
+    ).toBe(true);
+    expect(
+      /confirm\.mutateAsync[\s\S]*?invoiceId[\s\S]*?amountCents/.test(src),
+    ).toBe(true);
+    // Invalidate + close sólo si AMBAS 2xx.
+    expect(
+      /utils\.cobranza\.cobros\.list\.invalidate\([\s\S]*?onClose/.test(src),
+    ).toBe(true);
+  });
+
+  it("error UI visible: NO cerrar el dialog si register o confirm fallan", async () => {
+    const src = await readFile(
+      path.resolve(__dirname, "../src/modules/cobranza/cobros-list.tsx"),
+      "utf8",
+    );
+    // Si register falla → `submitError` con mensaje, no `onClose`.
+    expect(
+      /catch\s*\(regErr\)[\s\S]*?setSubmitError\(msg\)[\s\S]*?finally\s*\{[\s\S]*?setSubmitting\(false\)/.test(
+        src,
+      ),
+    ).toBe(true);
+    // Si confirm falla → `submitError` con mensaje
+    // `registerSubmitBothError` + msg; tampoco `onClose`.
+    expect(
+      /catch\s*\(confirmErr\)[\s\S]*?setSubmitError\(`\$\{[\s\S]*?registerSubmitBothError/.test(
+        src,
+      ),
+    ).toBe(true);
+    // El modal NO se cierra si hay error (sólo cierra en éxito).
+    expect(/if\s*\(fieldError\s*!==\s*null/.test(src)).toBe(true);
+  });
+
+  it("default paymentDate es hoy (YYYY-MM-DD, UTC midnight)", async () => {
+    const src = await readFile(
+      path.resolve(__dirname, "../src/modules/cobranza/cobros-list.tsx"),
+      "utf8",
+    );
+    // Default hoy: `toISOString().slice(0, 10)` con `setUTCHours(0,0,0,0)`.
+    expect(/d\.setUTCHours\(0,\s*0,\s*0,\s*0\)/.test(src)).toBe(true);
+    expect(/toISOString\(\)\.slice\(0,\s*10\)/.test(src)).toBe(true);
+  });
+
+  it("mensajes canónicos en messages.ts (no strings sueltas)", async () => {
+    const msgs = await readFile(
+      path.resolve(__dirname, "../src/shared/utils/messages.ts"),
+      "utf8",
+    );
+    for (const key of [
+      "registerTitle",
+      "registerSubmitting",
+      "registerSuccess",
+      "registerAmountMXN",
+      "registerAmountHelp",
+      "registerClientId",
+      "registerInvoiceId",
+      "registerPaymentDateHelp",
+      "registerUuidInvalid",
+      "registerAmountInvalid",
+      "registerInvoiceRequired",
+      "registerAmountExceedsSaldo",
+      "registerSubmitBothError",
+    ]) {
+      expect(new RegExp(`${key}:`).test(msgs)).toBe(true);
+    }
   });
 });
