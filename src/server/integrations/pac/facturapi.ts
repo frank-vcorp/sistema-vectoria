@@ -347,16 +347,11 @@ export function createPacHttpClient(
       idempotency_key: invoiceExternalId,
       status: "draft",
     };
-    const draft = await request<{
-      id: string;
-      status: string;
-      is_ready_to_stamp?: boolean;
-    }>({
-      method: "POST",
-      path: "/invoices",
-      idempotencyKey: invoiceExternalId,
-      body: invoiceBody,
-    });
+    const draft = await createOrRecoverInvoiceDraft(
+      request,
+      invoiceBody,
+      invoiceExternalId,
+    );
     // IMPL-20260825-36 (intento 6 · F-11 follow-up) · NO abortamos
     // localmente sólo por `is_ready_to_stamp === false`. Antes el
     // adapter cortaba aquí con `INVOICE_BUILD_INVALID` cuando el
@@ -742,4 +737,130 @@ function buildInvoiceExternalId(input: PacStampInput): string {
     .digest("hex")
     .slice(0, 32);
   return `inv:${hash}`;
+}
+
+/**
+ * IMPL-20260825-36 (intento 7 · F-13) · Crea el invoice draft o
+ * recupera el existente en caso de 409 por idempotency_key.
+ *
+ * Flujo:
+ *  1. POST `/v2/invoices` con `idempotency_key` (header + body).
+ *  2. Si responde 2xx, devuelve el draft.
+ *  3. Si responde 409, hace GET
+ *     `/v2/invoices?external_id=<X>&limit=100` y selecciona
+ *     **exactamente un** objeto con `external_id === X`. Si hay
+ *     0 o 2+ matches, re-throw el 409 original (sin elegir
+ *     heurísticamente).
+ *
+ * El GET es **sólo recuperación del recurso propio**: NO crea
+ * otro draft, NO cambia estado. La respuesta se filtra por
+ * match EXACTO de `external_id` (no `q=`, que podría traer
+ * recursos no relacionados).
+ */
+async function createOrRecoverInvoiceDraft(
+  request: <T>(args: {
+    method: "GET" | "POST" | "DELETE";
+    path: string;
+    idempotencyKey?: string;
+    body?: unknown;
+  }) => Promise<T>,
+  invoiceBody: Record<string, unknown>,
+  invoiceExternalId: string,
+): Promise<{
+  id: string;
+  status: string;
+  is_ready_to_stamp?: boolean;
+}> {
+  try {
+    return await request<{
+      id: string;
+      status: string;
+      is_ready_to_stamp?: boolean;
+    }>({
+      method: "POST",
+      path: "/invoices",
+      idempotencyKey: invoiceExternalId,
+      body: invoiceBody,
+    });
+  } catch (e) {
+    if (
+      e instanceof DomainError &&
+      e.code === "INVOICE_BUILD_INVALID" &&
+      e.statusCode === 409
+    ) {
+      // 409 al reintentar POST /invoices con la misma
+      // idempotency_key. Recuperamos el draft existente por
+      // external_id. NO heurística: si no hay match único,
+      // re-throw el 409 original con su diagnóstico.
+      const recovered = await findInvoiceByExternalId(
+        request,
+        invoiceExternalId,
+      );
+      if (!recovered) throw e;
+      return recovered;
+    }
+    throw e;
+  }
+}
+
+/**
+ * IMPL-20260825-36 (intento 7 · F-13) · GET
+ * `/v2/invoices?external_id=<X>&limit=100` y devuelve el único
+ * objeto con `external_id === X` (o `null` si 0 o 2+ matches).
+ *
+ * NO heurística: si el filtrado por match EXACTO devuelve más
+ * de un objeto (escenario anómalo: dos drafts colisionan en
+ * `external_id`), NO elige uno — bloquea con `null`. El caller
+ * (`createOrRecoverInvoiceDraft`) re-throw el 409 original.
+ */
+async function findInvoiceByExternalId(
+  request: <T>(args: {
+    method: "GET" | "POST" | "DELETE";
+    path: string;
+    idempotencyKey?: string;
+    body?: unknown;
+  }) => Promise<T>,
+  invoiceExternalId: string,
+): Promise<{
+  id: string;
+  status: string;
+  is_ready_to_stamp?: boolean;
+} | null> {
+  // El query `external_id` está documentado en
+  // `https://docs.facturapi.io/api#tag/Facturas/operation/listInvoices`.
+  const q = encodeURIComponent(invoiceExternalId);
+  const result = await request<{
+    data?: Array<{
+      id: string;
+      status: string;
+      external_id?: string;
+      is_ready_to_stamp?: boolean;
+    }>;
+  }>({
+    method: "GET",
+    path: `/invoices?external_id=${q}&limit=100`,
+  });
+  const list = Array.isArray(result.data) ? result.data : [];
+  // Filtro por match EXACTO. El filtro `external_id` del API
+  // puede devolver falsos positivos si Facturapi trata `external_id`
+  // como `q` texto libre; el match EXACTO aquí es la defensa.
+  const exact = list.filter(
+    (inv: { external_id?: string }) =>
+      inv.external_id === invoiceExternalId,
+  );
+  if (exact.length !== 1) return null;
+  const inv = exact[0] as {
+    id: string;
+    status: string;
+    is_ready_to_stamp?: boolean;
+  };
+  const out: {
+    id: string;
+    status: string;
+    is_ready_to_stamp?: boolean;
+  } = { id: inv.id, status: inv.status };
+  if (inv.is_ready_to_stamp !== undefined) {
+    out.is_ready_to_stamp = inv.is_ready_to_stamp;
+  }
+  return out;
 }

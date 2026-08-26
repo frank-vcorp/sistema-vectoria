@@ -870,6 +870,109 @@ interface CapturedRequest {
   body: string | null;
 }
 
+/**
+ * IMPL-20260825-36 (intento 7 · F-13) · Mock dinámico para tests
+ * que dependen del `external_id` real (que es un hash). En lugar
+ * de hardcodear un valor, el handler captura el POST /invoices
+ * body, extrae `external_id`, y lo usa en la respuesta del GET
+ * recovery. Esto evita fragilidad ante cambios del algoritmo de
+ * hash.
+ */
+function makeRecoveryFetchMock(
+  opts: {
+    /** Mockea la respuesta del GET recovery (devuelve `data` con match único). */
+    getRecoveryData?: (realExternalId: string) => Array<{
+      id: string;
+      status: string;
+      external_id?: string;
+      is_ready_to_stamp?: boolean;
+    }>;
+    /** Status del POST /invoices (default 409). */
+    postInvoiceStatus?: number;
+    /** Body del POST /invoices 4xx (default: idempotency_key_conflict). */
+    postInvoiceBody?: unknown;
+  } = {},
+): { fetchImpl: typeof fetch; captured: CapturedRequest[] } {
+  const captured: CapturedRequest[] = [];
+  let postInvoiceExternalId: string | null = null;
+  const fetchImpl = (async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    const url = typeof input === "string" ? input : (input as URL).toString();
+    const method = (init?.method ?? "GET").toUpperCase();
+    const headers: Record<string, string> = {};
+    if (init?.headers) {
+      if (init.headers instanceof Headers) {
+        init.headers.forEach((v, k) => {
+          headers[k] = v;
+        });
+      } else if (Array.isArray(init.headers)) {
+        for (const [k, v] of init.headers) headers[k] = v;
+      } else {
+        Object.assign(headers, init.headers as Record<string, string>);
+      }
+    }
+    const body =
+      typeof init?.body === "string"
+        ? (init.body as string)
+        : null;
+    captured.push({ url, method, headers, body });
+
+    if (method === "POST" && /\/customers$/.test(url)) {
+      return new Response(JSON.stringify({ id: "cust-1" }), { status: 200 });
+    }
+    if (method === "POST" && /\/invoices$/.test(url)) {
+      try {
+        const parsed = body ? (JSON.parse(body) as { external_id?: string }) : {};
+        postInvoiceExternalId = parsed.external_id ?? null;
+      } catch {
+        postInvoiceExternalId = null;
+      }
+      const status = opts.postInvoiceStatus ?? 409;
+      const bodyData =
+        opts.postInvoiceBody ?? {
+          message: "Idempotency key already used",
+          errors: [
+            {
+              source: "facturapi",
+              code: "idempotency_key_conflict",
+              path: "idempotency_key",
+              message: "Idempotency key already used",
+            },
+          ],
+        };
+      return new Response(JSON.stringify(bodyData), { status });
+    }
+    if (method === "GET" && /\/invoices\?external_id=/.test(url)) {
+      const realId = postInvoiceExternalId;
+      const data =
+        realId && opts.getRecoveryData
+          ? opts.getRecoveryData(realId)
+          : [];
+      return new Response(JSON.stringify({ data }), { status: 200 });
+    }
+    if (method === "POST" && /\/stamp$/.test(url)) {
+      return new Response(
+        JSON.stringify({
+          id: "inv-existing",
+          uuid: "U-RECOVERED",
+          status: "stamped",
+        }),
+        { status: 200 },
+      );
+    }
+    if (method === "GET" && /\/xml$/.test(url)) {
+      return new Response("<xml/>", { status: 200 });
+    }
+    if (method === "GET" && /\/pdf$/.test(url)) {
+      return new Response("%PDF-1.4", { status: 200 });
+    }
+    return new Response("", { status: 500 });
+  }) as typeof fetch;
+  return { fetchImpl, captured };
+}
+
 function makeFetchMock(responses: Array<{
   status: number;
   body?: unknown;
@@ -2178,5 +2281,307 @@ describe("IMPL-20260825-36 · AC-6 · idempotencia por invoiceId (F-12)", () => 
     const stampCallBlock = src.slice(stampCallPos, stampCallPos + 1500);
     expect(/invoiceId:\s*row\.id/.test(stampCallBlock)).toBe(true);
     expect(/invoiceCode:\s*row\.code/.test(stampCallBlock)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-36 · AC-8 (intento 7 · F-13) · Recuperación de
+// invoice draft existente tras 409 por idempotency_key.
+// `GET /v2/invoices?external_id=<X>&limit=100` selecciona
+// EXACTAMENTE un objeto con `external_id === X`. NO heurística:
+// 0 o 2+ matches bloquea con error canónico.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-36 · AC-8 · F-13 idempotency 409 → GET recovery", () => {
+it("409 al POST /invoices → GET recovery con match único → /stamp 2xx", async () => {
+    // IMPL-20260825-36 (intento 7 · F-13) · Mock dinámico: la
+    // respuesta del GET recovery se construye en runtime con el
+    // `external_id` real del POST. Evita hardcodear un hash que
+    // cambia entre runs.
+    const { fetchImpl, captured } = makeRecoveryFetchMock({
+      getRecoveryData: (realId) => [
+        {
+          id: "inv-existing",
+          status: "draft",
+          external_id: realId,
+          is_ready_to_stamp: true,
+        },
+      ],
+    });
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    const result = await pac.stamp({
+      ...stampInputSample,
+      invoiceId: "11111111-1111-1111-1111-111111111111",
+    });
+    // El UUID viene del stamp del draft recuperado.
+    expect(result.cfdiUuid).toBe("U-RECOVERED");
+    expect(result.status).toBe("stamped");
+    // Se llamaron: customers, invoices (409), invoices?external_id,
+    // invoices/{id}/stamp, /xml, /pdf.
+    expect(captured.length).toBe(6);
+    expect(captured[1]?.url).toMatch(/\/invoices$/);
+    expect(captured[1]?.method).toBe("POST");
+    expect(captured[2]?.url).toMatch(/\/invoices\?external_id=/);
+    expect(captured[2]?.method).toBe("GET");
+    expect(captured[2]?.url).toMatch(/limit=100/);
+    expect(captured[3]?.url).toMatch(/\/invoices\/inv-existing\/stamp$/);
+    // El external_id del POST coincide con el del GET (recovery).
+    const postBody = JSON.parse(
+      captured[1]?.body ?? "{}",
+    ) as { external_id?: string };
+    const getUrl = captured[2]?.url ?? "";
+    expect(getUrl).toContain(encodeURIComponent(postBody.external_id ?? ""));
+  });
+
+  it("409 → GET sin match (data: []) → re-throw 409 con diagnóstico", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      // POST /invoices devuelve 409.
+      {
+        status: 409,
+        body: {
+          message: "Idempotency key conflict",
+          errors: [
+            {
+              source: "facturapi",
+              code: "idempotency_key_conflict",
+              path: "idempotency_key",
+              message: "Conflict",
+            },
+          ],
+        },
+      },
+      // GET no encuentra match: lista vacía.
+      { status: 200, body: { data: [] } },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    let captured_err: { message: string; code: string; statusCode: number } | null = null;
+    try {
+      await pac.stamp(stampInputSample);
+    } catch (e) {
+      captured_err = e as { message: string; code: string; statusCode: number };
+    }
+    expect(captured_err).not.toBeNull();
+    // Re-throw del 409 original con código y status correctos.
+    expect(captured_err!.code).toBe("INVOICE_BUILD_INVALID");
+    expect(captured_err!.statusCode).toBe(409);
+    // NO se llamó /stamp, /xml, /pdf.
+    const stampReq = captured.find((r) => /\/stamp$/.test(r.url));
+    const xmlReq = captured.find((r) => /\/xml$/.test(r.url));
+    const pdfReq = captured.find((r) => /\/pdf$/.test(r.url));
+    expect(stampReq).toBeUndefined();
+    expect(xmlReq).toBeUndefined();
+    expect(pdfReq).toBeUndefined();
+    // Se llamaron: customers, invoices (409), invoices?external_id.
+    expect(captured.length).toBe(3);
+  });
+
+  it("409 → GET con múltiples matches (external_id duplicado) → re-throw 409", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      // POST /invoices devuelve 409.
+      { status: 409, body: { message: "Conflict" } },
+      // GET devuelve 2 objetos con el mismo external_id
+      // (escenario anómalo: dos drafts colisionan).
+      {
+        status: 200,
+        body: {
+          data: [
+            {
+              id: "inv-dup-1",
+              status: "draft",
+              external_id: "inv:abc123",
+            },
+            {
+              id: "inv-dup-2",
+              status: "draft",
+              external_id: "inv:abc123",
+            },
+          ],
+        },
+      },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    let captured_err: { code: string; statusCode: number } | null = null;
+    try {
+      await pac.stamp(stampInputSample);
+    } catch (e) {
+      captured_err = e as { code: string; statusCode: number };
+    }
+    expect(captured_err).not.toBeNull();
+    // NO heurística: re-throw 409 cuando hay múltiples matches.
+    expect(captured_err!.code).toBe("INVOICE_BUILD_INVALID");
+    expect(captured_err!.statusCode).toBe(409);
+    // Se llamaron: customers, invoices (409), invoices?external_id.
+    expect(captured.length).toBe(3);
+  });
+
+  it("409 → GET filtra por match EXACTO (defensa contra `q` texto libre)", async () => {
+    // Si el GET devuelve un objeto con external_id distinto al
+    // nuestro (porque Facturapi trata `external_id` como `q` texto
+    // libre), el filtro EXACTO lo descarta.
+    const { fetchImpl } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      { status: 409, body: { message: "Conflict" } },
+      {
+        status: 200,
+        body: {
+          data: [
+            {
+              id: "inv-other",
+              status: "draft",
+              external_id: "inv:different-hash",
+              // Falso positivo potencial del filtro `external_id`
+              // de Facturapi (lo trata como `q`).
+            },
+          ],
+        },
+      },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    let captured_err: { code: string; statusCode: number } | null = null;
+    try {
+      await pac.stamp(stampInputSample);
+    } catch (e) {
+      captured_err = e as { code: string; statusCode: number };
+    }
+    expect(captured_err).not.toBeNull();
+    // El filtro EXACTO rechaza el falso positivo: 0 matches.
+    expect(captured_err!.code).toBe("INVOICE_BUILD_INVALID");
+    expect(captured_err!.statusCode).toBe(409);
+  });
+
+  it("no POST /invoices adicional (recovery es sólo GET, no crear otro draft)", async () => {
+    // Después del 409 + GET recovery, NO debe haber un segundo
+    // POST /invoices (eso duplicaría el recurso).
+    const { fetchImpl, captured } = makeRecoveryFetchMock({
+      postInvoiceBody: { message: "Conflict" },
+      getRecoveryData: (realId) => [
+        {
+          id: "inv-existing",
+          status: "draft",
+          external_id: realId,
+          is_ready_to_stamp: true,
+        },
+      ],
+    });
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    await pac.stamp(stampInputSample);
+    // Sólo UN POST /invoices (el que devolvió 409).
+    const invoicePosts = captured.filter(
+      (r) => r.method === "POST" && /\/invoices$/.test(r.url),
+    );
+    expect(invoicePosts.length).toBe(1);
+  });
+
+  it("409 → GET NO filtra secret: apiKey NO aparece en URL ni headers del GET", async () => {
+    const { fetchImpl, captured } = makeRecoveryFetchMock({
+      postInvoiceBody: { message: "Conflict" },
+      getRecoveryData: (realId) => [
+        {
+          id: "inv-existing",
+          status: "draft",
+          external_id: realId,
+          is_ready_to_stamp: true,
+        },
+      ],
+    });
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_supersecret1234567890",
+      fetchImpl,
+    });
+    await pac.stamp(stampInputSample);
+    // El GET recovery lleva Authorization con el token (necesario
+    // para autenticarse), pero el token NO debe aparecer en la URL,
+    // body ni otros headers.
+    const getReq = captured[2];
+    expect(getReq?.url).not.toContain("sk_test_supersecret1234567890");
+    expect(getReq?.body ?? "").not.toContain("sk_test_supersecret1234567890");
+    // El Authorization header sí lleva el token (es HTTP estándar;
+    // no se loguea en `process.stderr`, sólo en headers internos).
+    expect(getReq?.headers["Authorization"]).toBe(
+      "Bearer sk_test_supersecret1234567890",
+    );
+  });
+
+  it("POST /invoices 2xx (no 409) NO dispara GET recovery (sólo en 409)", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      // POST /invoices 2xx directo.
+      {
+        status: 200,
+        body: {
+          id: "inv-new",
+          is_ready_to_stamp: true,
+        },
+      },
+      { status: 200, body: { id: "inv-new", uuid: "U-NEW", status: "stamped" } },
+      { status: 200, body: "<xml/>" },
+      { status: 200, body: "%PDF-1.4" },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    const result = await pac.stamp(stampInputSample);
+    expect(result.cfdiUuid).toBe("U-NEW");
+    // NO hubo 409, NO hubo GET recovery.
+    const getRec = captured.find((r) =>
+      /\/invoices\?external_id=/.test(r.url),
+    );
+    expect(getRec).toBeUndefined();
+    // 4 calls: customers, invoices, stamp, xml, pdf = 5.
+    expect(captured.length).toBe(5);
+  });
+
+  it("404 (no 409) NO dispara GET recovery", async () => {
+    const { fetchImpl, captured } = makeFetchMock([
+      { status: 200, body: { id: "cust-1" } },
+      {
+        status: 404,
+        body: { message: "Customer not found" },
+      },
+    ]);
+    const pac = createPacHttpClient({
+      baseUrl: "https://www.facturapi.io/v2",
+      apiKey: "sk_test_abc",
+      fetchImpl,
+    });
+    let captured_err: { code: string; statusCode: number } | null = null;
+    try {
+      await pac.stamp(stampInputSample);
+    } catch (e) {
+      captured_err = e as { code: string; statusCode: number };
+    }
+    expect(captured_err).not.toBeNull();
+    expect(captured_err!.code).toBe("INVOICE_NOT_FOUND");
+    expect(captured_err!.statusCode).toBe(404);
+    // NO GET recovery.
+    const getRec = captured.find((r) =>
+      /\/invoices\?external_id=/.test(r.url),
+    );
+    expect(getRec).toBeUndefined();
   });
 });

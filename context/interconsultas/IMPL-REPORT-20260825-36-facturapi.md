@@ -5,11 +5,11 @@ Estado: READY_FOR_VERIFYING
 SPEC: SPEC-20260817-007 (Facturación CFDI) actualizada
 ADR: ADR-20260825-01-integracion-facturapi
 Decisión: DEC-FUN-20260825-01 (Facturapi como PAC HTTP v2)
-Discovery refs: probe real `GET https://www.facturapi.io/v2/customers?limit=1` HTTP 200 con Test Secret Key; revisión oficial contra `docs.facturapi.io/api`; QA V3 staging `lista/preview` 200 OK + timbrar 412 por gate BD; F-11 is_ready_to_stamp=false con `verification.errors`; F-12 colisión 409 por clave idempotencia sólo RFC+importe; F-11 follow-up `/stamp` 400 con detalle tras `is_ready_to_stamp=false` sin errors[]
+Discovery refs: probe real `GET https://www.facturapi.io/v2/customers?limit=1` HTTP 200 con Test Secret Key; revisión oficial contra `docs.facturapi.io/api`; QA V3 staging `lista/preview` 200 OK + timbrar 412 por gate BD; F-11 is_ready_to_stamp=false con `verification.errors`; F-12 colisión 409 por clave idempotencia sólo RFC+importe; F-11 follow-up `/stamp` 400 con detalle tras `is_ready_to_stamp=false` sin errors[]; F-13 GET `/v2/invoices?external_id=X&limit=100` para recuperar draft existente tras 409 por idempotency_key
 Origen handoff: ATLAS (turno continuo)
 Fecha: 2026-08-26 (turno continuo)
 Implementador: SOFIA
-Intento: 6 (IMPLEMENTATION_DEFECT dentro IMPL-20260825-36, F-11 follow-up: dejar que /stamp valide)
+Intento: 7 (IMPLEMENTATION_DEFECT dentro IMPL-20260825-36, F-13 idempotency recovery por external_id)
 Proveedor activo previo: FacturoPorTi (ADR-20260817-09, ahora `superseded`)
 Proveedor activo nuevo: Facturapi v2 (ADR-20260825-01)
 ---
@@ -24,6 +24,49 @@ proveedor previo (FacturoPorTi, ADR-20260817-09 ahora
 frontera `PacClient` ya existente, **sin tocar el router, el servicio
 de facturación ni el schema**. La mock se conserva intacta para
 tests y para el default local.
+
+## Delta intento 7 (F-13 · idempotency recovery por external_id)
+
+QA confirmó F-13 contra docs.facturapi.io: `GET /v2/invoices`
+admite query `external_id` exacto, y Facturapi devuelve 409 al
+reintentar `POST /v2/invoices` con la misma `idempotency_key`. El
+draft externo ya existe y debe recuperarse en lugar de fallar.
+Tres fixes mínimos:
+
+**A. Encapsulación de creación del draft.** Nueva función
+`createOrRecoverInvoiceDraft(invoiceBody, invoiceExternalId)`:
+intenta POST `/v2/invoices` con `idempotency_key` (header +
+body). Si responde 2xx, devuelve el draft normalmente. Si
+responde 409 (`DomainError(INVOICE_BUILD_INVALID, 409)`),
+hace GET recovery. Si el GET no devuelve match único,
+re-throw el 409 original **con su diagnóstico sanitizado**.
+
+**B. GET recovery con filtro EXACTO.** Nueva función
+`findInvoiceByExternalId(invoiceExternalId)`: hace
+`GET /v2/invoices?external_id=<X>&limit=100` y selecciona
+**exactamente un** objeto con `external_id === X`. Si hay
+0 o 2+ matches, retorna `null` (NO elige heurísticamente).
+El filtro EXACTO es defensa contra el caso en que Facturapi
+trate `external_id` como `q` texto libre y devuelva
+falsos positivos.
+
+**C. El GET NO crea otro draft ni cambia estado.** Sólo es
+recuperación del recurso propio. Después del GET, el
+adapter continúa con `is_ready_to_stamp` + `/stamp` (intento 6)
+idénticamente. Si `/stamp` falla, no se descarga XML/PDF ni
+se muta la factura interna (anti-éxito-falso del intento 6).
+
+**Preservado del intento 6.** Claves por invoiceId (intento 5),
+customer key estable (intento 5), errores sanitizados (intento 4),
+`is_ready_to_stamp=false` ya NO aborta localmente (intento 6),
+XML/PDF como Buffer (intento 1), no mutar factura interna
+ante fallo (intento 6).
+
+**Sin cambios de comportamiento en éxito.** Cuando POST
+`/invoices` responde 2xx (primera llamada o cualquier retry
+donde Facturapi es idempotente), el flujo sigue idéntico al
+intento 6. El nuevo helper sólo agrega un fallback cuando
+Facturapi devuelve 409 específicamente por `idempotency_key`.
 
 ## Delta intento 6 (F-11 follow-up · dejar que /stamp valide)
 
@@ -342,14 +385,14 @@ Decisiones operativas (cumple ADR-20260825-01):
 
 | Archivo | Cambio |
 |---|---|
-| `src/server/integrations/pac/facturapi.ts` | **Nuevo**. `createPacHttpClient(opts)` implementa `PacClient` con fetch estándar. Métodos: `stamp` (POST /customers con `Idempotency-Key` header y body documentado `legal_name/tax_id/tax_system/email/address/default_invoice_use` → POST /invoices con `status=draft`, `external_id`, `idempotency_key` y `items[].product={description, product_key, price, tax_included:false}` → **POST /invoices/{id}/stamp (siempre; intento 6 ya NO aborta por `is_ready_to_stamp === false`)** → **GET /invoices/{id} fallback si `uuid` falta** → GET /invoices/{id}/xml + /pdf como Buffer) y `cancel` (POST /invoices/{uuid}/cancel con `{motivo}`). **Mapeo domicilio interno (`calle/numero/...`) → Facturapi (`street/exterior/...`) en `mapDomicilioToFacturapi` con validación pre-POST (`INVOICE_FISCAL_DATA_REQUIRED` si falta algún campo)**. **(intento 4)** Nuevo helper `extractFacturapiErrors(payload)` que proyecta `verification.errors[]` y `errors[]` en líneas `[path] code message`, sin PII ni secretos. **(intento 6)** Aplicado en `throwFacturapiHttpError` para 400/409/422 (incluye `case 400` específico). El branch `is_ready_to_stamp === false` ya NO aborta localmente: sólo registra `log("warn", ...)` y sigue a `/stamp`. Mapeo de errores 401/403/404/400/409/422/429/5xx a `DomainError`/`PacTransientError`. Timeout 15s default. `sanitizeMessage` enmascara `sk_test_*`/`sk_live_*`. Logger seguro a `process.stderr` (nunca `stdout`). |
+| `src/server/integrations/pac/facturapi.ts` | **Nuevo**. `createPacHttpClient(opts)` implementa `PacClient` con fetch estándar. Métodos: `stamp` (POST /customers con `Idempotency-Key` header y body documentado `legal_name/tax_id/tax_system/email/address/default_invoice_use` → **POST /invoices con `status=draft`, `external_id`, `idempotency_key`** vía `createOrRecoverInvoiceDraft` (intento 7: si responde 409, hace GET `/v2/invoices?external_id=X&limit=100` y selecciona match EXACTO único; si 0/2+ matches, re-throw 409) → **POST /invoices/{id}/stamp (siempre; intento 6 ya NO aborta por `is_ready_to_stamp === false`)** → **GET /invoices/{id} fallback si `uuid` falta** → GET /invoices/{id}/xml + /pdf como Buffer) y `cancel` (POST /invoices/{uuid}/cancel con `{motivo}`). **Mapeo domicilio interno (`calle/numero/...`) → Facturapi (`street/exterior/...`) en `mapDomicilioToFacturapi` con validación pre-POST (`INVOICE_FISCAL_DATA_REQUIRED` si falta algún campo)**. **(intento 4)** Nuevo helper `extractFacturapiErrors(payload)` que proyecta `verification.errors[]` y `errors[]` en líneas `[path] code message`, sin PII ni secretos. **(intento 6)** Aplicado en `throwFacturapiHttpError` para 400/409/422 (incluye `case 400` específico). **(intento 7)** Helpers `createOrRecoverInvoiceDraft` y `findInvoiceByExternalId`: recuperación idempotente por `external_id`, filtro EXACTO (no heurística). El branch `is_ready_to_stamp === false` ya NO aborta localmente: sólo registra `log("warn", ...)` y sigue a `/stamp`. Mapeo de errores 401/403/404/400/409/422/429/5xx a `DomainError`/`PacTransientError`. Timeout 15s default. `sanitizeMessage` enmascara `sk_test_*`/`sk_live_*`. Logger seguro a `process.stderr` (nunca `stdout`). |
 | `src/server/integrations/pac/index.ts` | `createPacClient(opts?)` ahora dispatcha por `mode` o env (`PAC_MODE=http` + `FACTURAPI_API_KEY` → HTTP, sino mock). Re-exporta `createPacHttpClient` y `FacturapiHttpClientOptions`. `createPacMockClient` y los códigos canónicos (`PAC_API_KEY_MISSING`, `CSD_NOT_CONFIGURED`, `INVALID_CANCEL_MOTIVE`) intactos. |
 | `src/server/services/facturacion/invoices.ts` | (intento 1/2) `descifrarCredencialesPac`: el guard de CSD se aplica sólo si `PAC_MODE !== "http"`. **(intento 3)** Nueva función `obtenerCredencialesTimbrar(orgId)` que bypassa BD en modo HTTP (early-return con credenciales vacías; el secreto efectivo vive en `FACTURAPI_API_KEY` del closure de `createPacHttpClient`). `timbrar` y `cancel` llaman a `obtenerCredencialesTimbrar` en lugar de `descifrarCredencialesPac`. **(intento 5 · F-12)** `timbrar` y `timbrarSystem` pasan `invoiceId: row.id` y `invoiceCode: row.code` al `pac.stamp` para que el adapter derive claves idempotentes únicas por invoice. El descifrado de `csd_password_ciphertext` es tolerante a `null`; los `Buffer.from([...])` del CSD se sustituyen por `Buffer.alloc(0)` cuando `csdCerBucketKey`/`csdPemBucketKey` faltan. La interfaz `PacStampInput` (`csdCer: Buffer`) sigue recibiendo bytes no-nulos (vacíos válidos para Facturapi). |
 | `src/server/trpc/routers/facturacion.ts` | `buildService()` llama `createPacClient()` sin args (auto-detecta por env). El router NO lee env directamente (delegado al factory en capa infra). |
 | `src/modules/orden-servicio/orden-detail.tsx` | (intento 3) `CreateInvoiceDraftDialog` añade campos `calle/numero/colonia/municipio/estado/cp/pais` pre-rellenados desde `clientes.fiscal.getForClient`. El handler `onSubmit` los envía a `clientes.fiscal.upsert({...domicilio:{...}})` antes de `buildFromOrder`. Validación cliente exige los 7 campos no-vacíos; mensaje canónico `createInvoiceFiscalAddressMissing`. |
 | `src/modules/facturacion/facturas-list.tsx` | (intento 3) La mutación `timbrar` añade `onError(err)` que mapea `INVOICE_FISCAL_DATA_REQUIRED` a mensaje amigable. Estado local `timbrarError` se renderiza con `<p role="alert" aria-live="assertive" data-testid="facturas-list-timbrar-error">` debajo de los botones. |
 | `src/shared/utils/messages.ts` | (intento 3) Nueva clave `createInvoiceFiscalAddressMissing` para el error de domicilio fiscal incompleto. |
-| `tests/spec-20260817-007.test.ts` | (intento 1) **+18 tests** (AC-1 Facturapi + AC-2 dispatch).<br/>(intento 2) **+5 tests** (AC-3 contrato documentado): shape `items[].product={description, product_key, price, tax_included}` con `price` en pesos y SIN campos inventados (`unit_price`, `factor`, `base`, `amount`); `default_invoice_use` en customer body sin `external_id`; `idempotency_key` + `external_id` en invoice body; GET `/invoices/{id}` fallback cuando `/stamp` no devuelve `uuid`; degradación controlada a `id` cuando ambos endpoints carecen de `uuid`.<br/>(intento 3) **+6 tests** (AC-4 bypass HTTP + domicilio + error UI): mapeo domicilio `calle/numero/...` → `street/exterior/...` con rechazo de claves españolas; rechazo `INVOICE_FISCAL_DATA_REQUIRED` cuando domicilio ausente o incompleto (sin HTTP); `facturas-list.tsx` tiene `onError` + `role="alert"` + `data-testid="facturas-list-timbrar-error"`; `orden-detail.tsx` expone los 7 inputs de domicilio y los envía a `fiscalUpsert.mutate({domicilio: {...}})`; `invoices.ts` define `obtenerCredencialesTimbrar` con `PAC_MODE=http` y `timbrar`/`cancel` ya NO usan `descifrarCredencialesPac` directamente.<br/>(intento 4) **+3 tests** (AC-5 diagnóstico errores 4xx): 422 con `errors[]` top-level; 422 sin `errors[]` con fallback a `message` sanitizado; 400 con `message` sanitizado. (Los 4 tests previos de `is_ready_to_stamp=false` que asumían el abort local fueron reemplazados por AC-7 intento 6.)<br/>(intento 5) **+5 tests** (AC-6 idempotencia por invoiceId · F-12): dos `invoiceId` distintos del mismo cliente/importe producen `external_id` distintos; reintento del mismo `invoiceId` produce el mismo `external_id` (estable); customer key estable por org+rfc, independiente del invoiceId; `PacStampInput` requiere `invoiceId: string` y `invoiceCode: string` (no opcionales); `invoices.timbrar` y `timbrarSystem` pasan `invoiceId: row.id` y `invoiceCode: row.code`.<br/>(intento 6) **+5 tests** (AC-7 dejar que /stamp valide · F-11 follow-up): `is_ready_to_stamp=false` → /stamp se llama y devuelve 400 con detalle (`paths[]`/`code`/`message`); `/stamp` 400 con `sk_test_*` accidental → enmascarado en mensaje; `/stamp` 400 PII safety (RFC/domicilio NO aparecen); `/stamp` 400 limita a 5 entradas; `is_ready_to_stamp=true` → /stamp 2xx → continúa con UUID/XML/PDF.<br/>**Total: 42 tests** específicos de Facturapi. |
+| `tests/spec-20260817-007.test.ts` | (intento 1) **+18 tests** (AC-1 Facturapi + AC-2 dispatch).<br/>(intento 2) **+5 tests** (AC-3 contrato documentado): shape `items[].product={description, product_key, price, tax_included}` con `price` en pesos y SIN campos inventados (`unit_price`, `factor`, `base`, `amount`); `default_invoice_use` en customer body sin `external_id`; `idempotency_key` + `external_id` en invoice body; GET `/invoices/{id}` fallback cuando `/stamp` no devuelve `uuid`; degradación controlada a `id` cuando ambos endpoints carecen de `uuid`.<br/>(intento 3) **+6 tests** (AC-4 bypass HTTP + domicilio + error UI): mapeo domicilio `calle/numero/...` → `street/exterior/...` con rechazo de claves españolas; rechazo `INVOICE_FISCAL_DATA_REQUIRED` cuando domicilio ausente o incompleto (sin HTTP); `facturas-list.tsx` tiene `onError` + `role="alert"` + `data-testid="facturas-list-timbrar-error"`; `orden-detail.tsx` expone los 7 inputs de domicilio y los envía a `fiscalUpsert.mutate({domicilio: {...}})`; `invoices.ts` define `obtenerCredencialesTimbrar` con `PAC_MODE=http` y `timbrar`/`cancel` ya NO usan `descifrarCredencialesPac` directamente.<br/>(intento 4) **+3 tests** (AC-5 diagnóstico errores 4xx): 422 con `errors[]` top-level; 422 sin `errors[]` con fallback a `message` sanitizado; 400 con `message` sanitizado. (Los 4 tests previos de `is_ready_to_stamp=false` que asumían el abort local fueron reemplazados por AC-7 intento 6.)<br/>(intento 5) **+5 tests** (AC-6 idempotencia por invoiceId · F-12): dos `invoiceId` distintos del mismo cliente/importe producen `external_id` distintos; reintento del mismo `invoiceId` produce el mismo `external_id` (estable); customer key estable por org+rfc, independiente del invoiceId; `PacStampInput` requiere `invoiceId: string` y `invoiceCode: string` (no opcionales); `invoices.timbrar` y `timbrarSystem` pasan `invoiceId: row.id` y `invoiceCode: row.code`.<br/>(intento 6) **+5 tests** (AC-7 dejar que /stamp valide · F-11 follow-up): `is_ready_to_stamp=false` → /stamp se llama y devuelve 400 con detalle (`paths[]`/`code`/`message`); `/stamp` 400 con `sk_test_*` accidental → enmascarado en mensaje; `/stamp` 400 PII safety (RFC/domicilio NO aparecen); `/stamp` 400 limita a 5 entradas; `is_ready_to_stamp=true` → /stamp 2xx → continúa con UUID/XML/PDF.<br/>(intento 7) **+8 tests** (AC-8 F-13 idempotency recovery): 409 al POST /invoices → GET recovery con match único → /stamp 2xx; 409 → GET sin match (data: []) → re-throw 409 con diagnóstico; 409 → GET con múltiples matches (external_id duplicado) → re-throw 409; 409 → GET filtra por match EXACTO (defensa contra `q` texto libre); no POST /invoices adicional (recovery es sólo GET, no crear otro draft); 409 → GET NO filtra secret (apiKey NO aparece en URL ni headers); POST /invoices 2xx (no 409) NO dispara GET recovery; 404 (no 409) NO dispara GET recovery. Helper `makeRecoveryFetchMock(opts)` captura el `external_id` real del POST para no hardcodear hashes.<br/>**Total: 50 tests** específicos de Facturapi. |
 
 **Sin cambios en:** schema (`organization_fiscal_config`,
 `invoices`), `pac.ts`/router de tRPC, permisos `gestionar_facturacion`
@@ -359,13 +402,14 @@ existentes), `package.json` (sin deps nuevas).
 ## Validación
 
 - **typecheck (`pnpm typecheck`)**: **PASS** (sin output, exit 0).
-- **tests (V2 completa, `pnpm test`)**: **986/986 PASS** en 32
-  ficheros · 8.88 s
-  - `tests/spec-20260817-007.test.ts`: **93/93** (51 originales +
-    **42 nuevos** Facturapi: 18 intento 1 + 5 intento 2 AC-3
+- **tests (V2 completa, `pnpm test`)**: **994/994 PASS** en 32
+  ficheros · 8.72 s
+  - `tests/spec-20260817-007.test.ts`: **101/101** (51 originales +
+    **50 nuevos** Facturapi: 18 intento 1 + 5 intento 2 AC-3
     + 6 intento 3 AC-4 bypass/domicilio/UI + 3 intento 4 AC-5
-    errores 4xx + 5 intento 5 AC-6 idempotencia F-12 + 5 intento 6
-    AC-7 dejar que /stamp valide F-11 follow-up).
+    errores 4xx + 5 intento 5 AC-6 idempotencia F-12 +
+    5 intento 6 AC-7 dejar que /stamp valide F-11 follow-up
+    + 8 intento 7 AC-8 idempotency recovery F-13).
   - `tests/impl-20260825-32.test.ts`: **30/30**.
   - `tests/impl-20260825-29.test.ts`: **33/33**.
   - Resto: **765/765** PASS.
@@ -442,6 +486,67 @@ existentes), `package.json` (sin deps nuevas).
   el intento 5 (mismas claves canónicas `cancelled`,
   `borrador`, `emitida`; mismo flujo de UI). No requiere
   cambios al PAC real.
+
+## Riesgos y desviaciones (intento 7)
+
+- **Riesgo muy bajo.** Cambio aditivo: dos nuevos helpers
+  (`createOrRecoverInvoiceDraft`, `findInvoiceByExternalId`) +
+  un nuevo caso de manejo (catch del 409). NO hay cambio de
+  comportamiento en el flujo feliz (cuando POST `/invoices`
+  es 2xx, sigue idéntico al intento 6).
+
+- **Compatibilidad con intento 5:** las claves `external_id`
+  únicas por invoiceId siguen garantizando que colisiones
+  NO ocurran en flujo normal. El 409 + recovery cubre el
+  caso anómalo (Facturapi con bug de idempotency o cambio
+  de su contrato).
+
+- **Live/producción:** el cambio es backwards-compatible con
+  el intento 6 (mismas claves canónicas; mismo flujo de UI).
+  No requiere cambios al PAC real.
+
+## Decisiones internas reversibles (intento 7)
+
+- **Filtro EXACTO en `findInvoiceByExternalId`:** la doc oficial
+  de Facturapi v2 NO garantiza que el query `external_id` haga
+  match EXACTO (puede tratarse como `q` texto libre). Por
+  seguridad, el adapter filtra en memoria por
+  `inv.external_id === invoiceExternalId` y rechaza si 0 o
+  2+ matches. Tests AC-8 verifican el rechazo de falsos
+  positivos.
+
+- **NO heurística en múltiples matches:** si el GET devuelve
+  2+ objetos con el mismo `external_id` (escenario anómalo,
+  no debería ocurrir), el adapter retorna `null` y el caller
+  re-throw el 409. No elige uno arbitrariamente: sería
+  anti-seguro para datos fiscales.
+
+- **GET recovery limitado por `limit=100`:** el endpoint
+  `GET /v2/invoices?external_id=X&limit=100` está documentado;
+  el `limit=100` es el default de la API y suficiente para
+  capturar drafts propios. Si Frank tiene >100 facturas en
+  el mismo `external_id` (imposible en flujo normal porque
+  el hash es único), el adapter necesitaría paginación; esto
+  queda para un incremento posterior si llegara a ocurrir.
+
+- **El GET NO muta estado del draft:** sólo es recuperación
+  del recurso. Después, el flujo continúa con `/stamp` (intento
+  6). Si `/stamp` falla con 400, el adapter NO descarga XML/PDF
+  ni muta la fila `invoices`. Si el draft recuperado está
+  ya en estado `stamped`, el `/stamp` de Facturapi responde
+  con la misma factura (idempotente) y devolvemos el mismo
+  `cfdi_uuid`.
+
+- **Compatibilidad hacia atrás con mock:** `createPacMockClient`
+  no usa `createOrRecoverInvoiceDraft` ni `findInvoiceByExternalId`
+  (mock stamp sigue su flujo determinista). Tests AC-1 (mock)
+  pasan idénticamente.
+
+- **El error 409 original se re-throw con su diagnóstico
+  sanitizado** (intento 4) cuando NO hay match único. El
+  caller tRPC ve el mismo `DomainError(INVOICE_BUILD_INVALID,
+  409)` con `path`/`code`/`message` del body. NO se
+  enmascara el 409 detrás de un error genérico.
 
 ## Decisiones internas reversibles (intento 6)
 
@@ -900,6 +1005,26 @@ siguen funcionando idénticos).
      oficial del stamp; el PL/Director decide si ampliar el
      formulario con `clientes.fiscal.upsert` en otro
      incremento.
+  **Escenarios V3 intento 7 (2):**
+  - 29. **409 → GET recovery → /stamp 2xx (idempotencia real):**
+     ejecutar `timbrar` dos veces para la misma OS. ASSERT:
+     (a) el primer POST `/v2/invoices` devuelve 2xx con
+     `id=draft-1`. (b) el segundo POST `/v2/invoices` devuelve
+     409 (`idempotency_key ya usado`). (c) el adapter hace
+     GET `/v2/invoices?external_id=X&limit=100` y encuentra
+     el `draft-1` por match EXACTO. (d) el adapter llama
+     `/v2/invoices/draft-1/stamp` con el mismo `idempotency_key`
+     y Facturapi responde con la misma factura ya timbrada
+     (idempotente). (e) el resultado final es el mismo
+     `cfdi_uuid` que la primera llamada.
+  - 30. **409 → GET sin match único bloquea con 409 original:**
+     ejecutar `timbrar` con un cliente nuevo (RFC único) y
+     forzar que el segundo POST `/v2/invoices` devuelva 409.
+     Mockear el GET con `data: []` (sin match). ASSERT:
+     el adapter NO descarga XML/PDF; el
+     `DomainError(INVOICE_BUILD_INVALID, 409)` aparece con
+     `path`/`code`/`message` del body del 409 original; NO
+     se inventa dirección ni se reintenta con heurística.
 - **Live/producción:** pendiente autorización explícita de Frank +
 - **Live/producción:** pendiente autorización explícita de Frank +
   provisión de `sk_live_*` + revisión de cumplimiento fiscal + CSD
