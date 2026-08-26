@@ -261,3 +261,34 @@ Frank autorizó el cambio como IMPLEMENTATION_DEFECT dentro de IMPL-38.
 - Capturas en `test-results/invoice-draft-staging-20260825/`: `billing4-00-close.png`.
 - Runners: `/tmp/kilo/billing4-{probe,close}.cjs`.
 - IDs: OS-00001 (`delivered`, `finalInvoiceIssued=false`), F-00005 (`pagada`), cobro `b383e711-…` (`confirmado`).
+
+---
+
+# V3 staging — GATE FINAL (B-5 backfill) · commit `9493ecf` · deployment `faymoapwdyllwrx4z9zhpnsc`
+
+> Gate final GEMINI (QA-20260825-34). Veredicto del cierre: **PASS_WITH_WARNINGS**.
+
+## Resultado
+
+- `closeAdministrative` ("Cerrar OS", sin excepción, 1×) → **200**:
+  `status=closed`, `closedBalanceCents=0`, `finalInvoiceIssued=true`
+  (backfill `backfill_on_close`), `closedDirectorException=false`.
+- OS-00001: `delivered → closed` (persistido tras reload desktop y mobile).
+- Botón "Cerrar OS" ausente tras el cierre (no hay doble cierre posible).
+- F-00005 `pagada` (`paidCents=total`), cobro `b383e711-…` `confirmado`.
+- 0 console/page/request/http errors; `overflow=false` en 1280 y 375.
+
+## Estado de hallazgos
+
+| ID | Estado |
+|---|---|
+| B-4 (saldo) | RESUELTO |
+| B-4 (`finalInvoiceIssued` side-effect) | RESUELTO |
+| B-5 (backfill pre-deploy) | **RESUELTO** (backfill en `closeAdministrative`, verificado) |
+| F-14 (bitácora `/audit` vacía) | P3 persistente (escritura por código verificada; lectura UI pendiente) |
+
+## Evidencia
+
+- QA: `context/reviews/QA-20260825-34-SPEC-007-invoice-draft.md` (sección "GATE FINAL DE CIERRE").
+- Capturas: `billing5-00-closed.png`, `billing5-01-mobile-closed.png`.
+- Runners: `/tmp/kilo/billing5-{close,mobile,audit}.cjs`.

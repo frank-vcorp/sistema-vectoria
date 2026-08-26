@@ -220,3 +220,43 @@ instrucción del handoff es agregar nota "sólo si no mezcla
 cambios ajenos". El archivo se modificará al final del turno
 cuando ATLAS consolide el WIP del día; mezclar aquí podría
 confundir al lector sobre el estado actual del proyecto.
+
+---
+
+# V3 staging (GEMINI · QA-20260825-34) · evidencia de ejecución real
+
+> Registro de la ejecución real contra staging (que en el corte
+> quedó como "NO EJECUTADA"). Commit `e002224`, deployment
+> `tvwpgxvu5p3ci5xmfzobzyod`. Veredicto del pago: **PASS**. Cierre
+> administrativo: **BLOCKED** (gap de contrato backend, no UI).
+
+## Pago sintético (PASS)
+
+- `cobranza.cobros.register` → **200**, `paymentId=b383e711-5bdd-47ec-b163-31d903cb8a79`.
+- `cobranza.cobros.confirm({ paymentId, applications:[{ invoiceId:F-00005, amountCents:12760000 }] })` → **200**, `status=confirmado`, `application=ca293b14-…`.
+- Cobro en lista: `method=transferencia`, `reference=TEST-FACTURAPI-20260826`, `paymentDate=2026-08-26`, `12,760,000¢`, `confirmado`.
+- F-00005 → `pagada`, `paidCents=12,760,000 = totalCents`, `cfdiUuid` conservado.
+- Sin sobrepago ni duplicación tras reload. Desktop 1280 + mobile 375: `overflow=false`, 0 page/request/http errors.
+
+## Cierre administrativo (BLOCKED, hallazgo B-4)
+
+El botón "Cerrar OS" (sin excepción) en la OS-00001 devuelve
+`409 OUTSTANDING_BALANCE` ("Saldo pendiente sin excepción Director")
+aunque la factura F-00005 esté `pagada`:
+
+- `closeAdministrative` calcula el saldo con
+  `advanceProvider.getAdvancePaidCents(...)` (anticipo de la
+  cotización), **no** con el `paidCents` de la factura SPEC-008.
+  Por eso el saldo de la OS sigue `12,760,000` pese al cobro.
+- `finalInvoiceIssued` permanece `false` (no hay side-effect que lo
+  active), por lo que aun con saldo cero el cierre fallaría con
+  `FINAL_INVOICE_REQUIRED`.
+
+Esto NO es un defecto de IMPl-37 (la UI de cobro funciona), sino
+un gap de reconciliación SPEC-004↔007↔008 a resolver por ATLAS.
+
+## Evidencia
+
+- QA: `context/reviews/QA-20260825-34-SPEC-007-invoice-draft.md` (sección "PAGO SINTÉTICO + CIERRE").
+- Capturas en `test-results/invoice-draft-staging-20260825/`: `billing3-0[0-4]-*.png`.
+- Runners: `/tmp/kilo/billing3-{payment,mobile}.cjs`.
