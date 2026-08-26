@@ -578,3 +578,64 @@ describe("SPEC-010 · AC-9 · UI responsive (grep)", () => {
     expect(src).toContain("signedUrl");
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-39 (F-14/P3) · la ruta `/audit` debe renderizar
+// `BitacoraView` (que ya llama a `trpc.bitacora.audit.list`), NO el
+// placeholder `AuditList` con `messages.audit.empty` fijo.
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-39 (F-14/P3) · ruta `/audit` usa BitacoraView", () => {
+  it("audit/page.tsx importa y renderiza `BitacoraView`", async () => {
+    const src = await readFile(
+      "src/app/(dashboard)/audit/page.tsx",
+      "utf8",
+    );
+    expect(src).toMatch(
+      /import\s*\{[^}]*\bBitacoraView\b[^}]*\}\s*from\s*["']@\/modules\/bitacora\/bitacora-view["']/,
+    );
+    expect(src).toMatch(/return\s*<BitacoraView\s*\/?>/);
+  });
+  it("audit/page.tsx NO importa el placeholder `AuditList`", async () => {
+    const src = await readFile(
+      "src/app/(dashboard)/audit/page.tsx",
+      "utf8",
+    );
+    expect(src).not.toMatch(
+      /import\s*\{[^}]*\bAuditList\b[^}]*\}\s*from\s*["']@\/modules\/plataforma\/auditoria\/audit-list["']/,
+    );
+    expect(src).not.toContain("AuditList");
+  });
+  it("audit/page.tsx NO usa `messages.audit.empty` fijo (placeholder)", async () => {
+    const src = await readFile(
+      "src/app/(dashboard)/audit/page.tsx",
+      "utf8",
+    );
+    expect(src).not.toContain("messages.audit.empty");
+    expect(src).not.toContain("messages.audit.title");
+  });
+  it("placeholder `audit-list.tsx` fue eliminado (sin callers)", async () => {
+    const { existsSync } = await import("node:fs");
+    expect(
+      existsSync("src/modules/plataforma/auditoria/audit-list.tsx"),
+    ).toBe(false);
+  });
+  it("la navegación sigue apuntando a `/audit` (path preservado)", async () => {
+    const src = await readFile(
+      "src/modules/plataforma/layout/navigation.tsx",
+      "utf8",
+    );
+    expect(src).toMatch(/href:\s*["']\/audit["']/);
+  });
+  it("bitacora-view ya implementa `trpc.bitacora.audit.list` con filtros/paginación", async () => {
+    const src = await readFile(
+      "src/modules/bitacora/bitacora-view.tsx",
+      "utf8",
+    );
+    expect(src).toContain("trpc.bitacora.audit.list.useQuery");
+    expect(src).toContain("entityType");
+    expect(src).toContain("action");
+    // Paginación: `offset`/`limit` mutables.
+    expect(src).toMatch(/setPage\(\(p\)\s*=>\s*\(\{\s*\.\.\.\s*p,\s*offset:\s*p\.offset\s*\+\s*p\.limit\s*\}\)\)/);
+  });
+});
