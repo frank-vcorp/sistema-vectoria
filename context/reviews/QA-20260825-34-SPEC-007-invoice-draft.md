@@ -1600,3 +1600,58 @@ Mutaciones: 1× `closeAdministrative` (200, cierre). **No** cancelé/reversé/pa
 ---
 
 **QA-VERDICT (gate final de cierre)**: `PASS_WITH_WARNINGS` · `closeAdministrative` ("Cerrar OS", sin excepción, 1×) → **200 `closed`** · `closedBalanceCents=0` · **`finalInvoiceIssued=true`** (backfill B-5 verificado) · OS-00001 `delivered → closed` (persistido), F-00005 `pagada` (cfdiUuid/XML/PDF), cobro `b383e711-…` confirmado · reload desktop/mobile: botón ausente, 0 errors, `overflow=false` · warning P3: F-14 (bitácora `/audit` vacía) · evidencias `billing5-0[0-1]-*.png` + runners `/tmp/kilo/billing5-{close,mobile,audit}.cjs` · **cadena billing completa en staging (Test)**: borrador → emitida → pagada → closed · staging `LISTO (billing completo)` · producción `NO_LISTO`.
+---
+
+# GATE FINAL F-14 (bitácora `/audit`) · commit `adb271f` · deployment `o8lae8uqlt3qtvn5zpmgfe59`
+
+> F-14 resuelto: `/audit` renderiza `BitacoraView` (que ya implementa `trpc.bitacora.audit.list`, filtros, paginación y responsive) en lugar del placeholder estático.
+
+## QA-VERDICT (F-14 bitácora): `PASS`
+
+La bitácora `/audit` ya **no muestra el placeholder fijo** y **invoca `bitacora.audit.list`**, devolviendo **eventos reales de `audit_logs` del flujo billing** (read-only, sin mutaciones).
+
+| Verificación | Resultado |
+|---|---|
+| `bitacora.audit.list` | **200**, `total=365`, `items=25` (paginado) |
+| Acciones billing presentes | `factura.timbrar` (invoice `e4827b7c`=F-00005) · `cobro.register`+`cobro.confirm` (payment `b383e711`) · `os.final_invoice_issued` (order `f5a33626`, source backfill) · `os.closed` (order `f5a33626`) — **las 5 presentes** |
+| Placeholder fijo | **ausente** ("No hay eventos para mostrar" = false) |
+| Filtros entidad/acción | presentes |
+| Desktop 1280 / mobile 375 | `overflow=false`, `consoleErrors=[]`, `pageErrors=[]`, `requestFailures=[]`, `httpErrors=[]` |
+
+**Nota (no bloqueante):** la bitácora cubre filtros `entityType`/`action` (no `date`); el filtro fecha específico queda para un incremento posterior (documentado en IMPL-39 como fuera de alcance).
+
+---
+
+## Hallazgos — cierre de F-14
+
+| ID | Sev | Estado |
+|---|---|---|
+| **F-14** | P3 | **RESUELTO** — `/audit` usa `BitacoraView`; `bitacora.audit.list` 200 con eventos billing reales, filtros y responsive verificados |
+
+## Validación independiente
+
+```
+set -a; . /home/frank/.config/kilo/integra.secrets.env; set +a
+NODE_PATH=... node /tmp/kilo/f14-audit.cjs    # desktop: audit.list 200 + 5 acciones billing + filtros + overflow
+NODE_PATH=... node /tmp/kilo/f14-mobile.cjs   # mobile: audit.list 200 + overflow false + 0 errors
+```
+
+Wire: `bitacora.audit.list` 200 (total 365, items 25); acciones únicas incluyen las 5 del flujo billing con `entityType`/`entityId`/`createdAt`; placeholder ausente.
+
+## Riesgo operativo
+
+0 mutaciones (sólo lectura de `/audit`/`bitacora.audit.list`). Sin pagar/cerrar/cancelar/timbrar/producción. Sin secretos.
+
+## Handoff a ATLAS
+
+1. Aceptar **`PASS`** (F-14 resuelto): la bitácora `/audit` muestra la traza billing real.
+2. La cadena billing completa (borrador → emitida → pagada → closed) queda **verificada E2E en staging Test**, con su bitácora visible.
+3. Siguientes fases (cancelación/reembolso, producción Live) requieren autorización explícita aparte. No `DONE`/producción por GEMINI.
+
+## Autoauditoría
+
+✅ Verifiqué `/audit` autenticado como Director (sólo lectura), sin mutaciones. ✅ Evidencia wire real (`bitacora.audit.list` 200, 5 acciones billing con IDs). ✅ No edité código/SPEC/ADR/`PROYECTO.md`; runners en `/tmp/kilo`; captures en `test-results/`. ✅ No imprimí secretos/PII (IDs de negocio). ✅ F-14 cerrado con evidencia. ✅ No invoqué subagentes ni declaré `DONE`.
+
+---
+
+**QA-VERDICT (F-14 bitácora)**: `PASS` · `/audit` renderiza `BitacoraView` (placeholder eliminado) · `bitacora.audit.list` → **200** (`total=365`) con las **5 acciones billing** verificadas (`factura.timbrar`, `cobro.register`, `cobro.confirm`, `os.final_invoice_issued`, `os.closed`) · filtros entidad/acción + responsive desktop/mobile con `overflow=false` y 0 errors · 0 mutaciones (sólo lectura) · **F-14 resuelto** · evidencias `f14-0[0-1]-*.png` + runners `/tmp/kilo/f14-{audit,mobile}.cjs` · staging `LISTO (billing completo + bitácora)` · producción `NO_LISTO`.

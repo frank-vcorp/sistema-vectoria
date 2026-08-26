@@ -180,3 +180,27 @@ confundir al lector sobre el estado actual del proyecto.
 | Permisos | NO |
 | Auditoría | NO |
 | Listo para gate GEMINI V3 | sí |
+
+---
+
+# V3 staging (GEMINI · QA-20260825-34) · gate F-14 — evidencia real
+
+> Ejecución real (que en el corte quedó como "NO EJECUTADA"). Deployment
+> `o8lae8uqlt3qtvn5zpmgfe59`. Veredicto: **PASS**.
+
+## Resultado (read-only, Director)
+
+- `trpc.bitacora.audit.list` → **200**, `total=365`, `items=25` (paginado).
+- Las **5 acciones del flujo billing** están presentes en `audit_logs`:
+  `factura.timbrar` (invoice `e4827b7c`), `cobro.register` + `cobro.confirm`
+  (payment `b383e711`), `os.final_invoice_issued` (order `f5a33626`, source
+  backfill_on_close), `os.closed` (order `f5a33626`).
+- Placeholder fijo eliminado ("No hay eventos para mostrar" no aparece).
+- Filtros `entityType`/`action` operativos; responsive desktop 1280 y
+  mobile 375 con `overflow=false`; 0 console/page/request/http errors.
+
+## Evidencia
+
+- QA: `context/reviews/QA-20260825-34-SPEC-007-invoice-draft.md` (sección "GATE FINAL F-14 (bitácora /audit)").
+- Capturas: `f14-00-audit-desktop.png`, `f14-01-audit-mobile.png`.
+- Runners: `/tmp/kilo/f14-{audit,mobile}.cjs`.
