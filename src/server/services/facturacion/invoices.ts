@@ -761,6 +761,14 @@ return {
           descuentoCents: 0,
         },
         totalCents: row.totalCents,
+        // IMPL-20260825-36 (intento 5 · F-12) · Identificadores
+        // internos para idempotencia por invoice. El adaptador
+        // Facturapi deriva la clave `external_id` del invoice
+        // combinando `organizationId + invoiceId`, evitando
+        // colisiones entre facturas distintas del mismo
+        // cliente/importe.
+        invoiceId: row.id,
+        invoiceCode: row.code,
       };
       const stampResult = await pac.stamp(stampInput);
       // 3) Subir XML/PDF al bucket (BR-N371). Estos uploads **auditan**
@@ -1599,6 +1607,10 @@ return {
         descuentoCents: 0,
       },
       totalCents: row.totalCents,
+      // IMPL-20260825-36 (intento 5 · F-12) · Identificadores
+      // internos para idempotencia por invoice (job system/recurrente).
+      invoiceId: row.id,
+      invoiceCode: row.code,
     });
     // uploaded_by requiere NOT NULL: para el job system usamos como
     // proxy el PL de la OS (siempre existe en una OS autorizada).

@@ -219,6 +219,8 @@ describe("SPEC-007 · AC-1 · timbrado real con PAC (mock P-007-1)", () => {
       csdPem: Buffer.from([0x02]),
       csdPassword: "mock",
       rfcEmisor: "VAI000101AAA",
+      invoiceId: "00000000-0000-0000-0000-000000000003",
+      invoiceCode: "FAC-MOCK-003",
       receptor: {
         rfc: "XAXX010101000",
         razonSocial: "Receptor mock",
@@ -250,6 +252,8 @@ describe("SPEC-007 · AC-1 · timbrado real con PAC (mock P-007-1)", () => {
         csdPem: Buffer.from([0x02]),
         csdPassword: "mock",
         rfcEmisor: "VAI000101AAA",
+        invoiceId: "00000000-0000-0000-0000-000000000001",
+        invoiceCode: "FAC-MOCK-001",
         receptor: {
           rfc: "XAXX010101000",
           razonSocial: "Receptor mock",
@@ -275,6 +279,8 @@ describe("SPEC-007 · AC-1 · timbrado real con PAC (mock P-007-1)", () => {
         csdPem: Buffer.from([0x02]),
         csdPassword: "mock",
         rfcEmisor: "VAI000101AAA",
+        invoiceId: "00000000-0000-0000-0000-000000000002",
+        invoiceCode: "FAC-MOCK-002",
         receptor: {
           rfc: "XAXX010101000",
           razonSocial: "Receptor mock",
@@ -930,6 +936,8 @@ const stampInputSample: PacStampInput = {
   csdPem: Buffer.alloc(0),
   csdPassword: "",
   rfcEmisor: "VEC681010AA1",
+  invoiceId: "00000000-0000-0000-0000-000000000001",
+  invoiceCode: "FAC-2026-000001",
   receptor: {
     rfc: "XAXX010101000",
     razonSocial: "Cliente Test SA",
@@ -1046,12 +1054,15 @@ describe("IMPL-20260825-36 · AC-1 · adaptador Facturapi v2 HTTP (ADR-20260825-
     expect(customerBody.external_id).toBeUndefined();
     expect(customerBody.default_invoice_use).toBe("G03");
     // Invoice body debe llevar `external_id`, `idempotency_key`
-    // (campo documentado) y `status: draft`.
+    // (campo documentado) y `status: draft`. IMPL-20260825-36
+    // (intento 5 · F-12): prefijo `inv:` basado en
+    // `organizationId + invoiceId` (antes era `os:` y derivaba
+    // de RFC+importe).
     const invoiceBody = JSON.parse(
       captured[1]?.body ?? "{}",
     ) as Record<string, unknown>;
-    expect(invoiceBody.external_id).toMatch(/^os:/);
-    expect(invoiceBody.idempotency_key).toMatch(/^os:/);
+    expect(invoiceBody.external_id).toMatch(/^inv:/);
+    expect(invoiceBody.idempotency_key).toMatch(/^inv:/);
     expect(invoiceBody.status).toBe("draft");
   });
 
@@ -1952,5 +1963,185 @@ describe("IMPL-20260825-36 · AC-5 · diagnóstico is_ready_to_stamp=false y err
     expect(msg).toContain("customer.field_4");
     expect(msg).not.toContain("customer.field_5");
     expect(msg).not.toContain("customer.field_11");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPL-20260825-36 · AC-6 (intento 5 · F-12) · Idempotencia por
+// invoiceId. Antes el hash derivaba sólo de org+rfc+importe, lo que
+// provocaba colisión entre facturas distintas del mismo
+// cliente/importe. Ahora la clave única por invoice combina
+// `organizationId + invoiceId` y la clave de customer es estable
+// por org+rfc.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-36 · AC-6 · idempotencia por invoiceId (F-12)", () => {
+  it("dos invoiceId distintos del mismo cliente/importe => claves distintas", async () => {
+    const capturedIds: string[] = [];
+    // Primer stamp.
+    {
+      const { fetchImpl, captured } = makeFetchMock([
+        { status: 200, body: { id: "cust-1" } },
+        { status: 200, body: { id: "inv-A", is_ready_to_stamp: true } },
+        { status: 200, body: { id: "inv-A", uuid: "U-A", status: "stamped" } },
+        { status: 200, body: "<xml/>" },
+        { status: 200, body: "%PDF-1.4" },
+      ]);
+      const pac = createPacHttpClient({
+        baseUrl: "https://www.facturapi.io/v2",
+        apiKey: "sk_test_abc",
+        fetchImpl,
+      });
+      await pac.stamp({
+        ...stampInputSample,
+        invoiceId: "11111111-1111-1111-1111-111111111111",
+        invoiceCode: "FAC-A",
+      });
+      const invoiceBody = JSON.parse(
+        captured[1]?.body ?? "{}",
+      ) as Record<string, unknown>;
+      capturedIds.push(String(invoiceBody.external_id));
+    }
+    // Segundo stamp con invoiceId DISTINTO (mismo cliente/importe).
+    {
+      const { fetchImpl, captured } = makeFetchMock([
+        { status: 200, body: { id: "cust-2" } },
+        { status: 200, body: { id: "inv-B", is_ready_to_stamp: true } },
+        { status: 200, body: { id: "inv-B", uuid: "U-B", status: "stamped" } },
+        { status: 200, body: "<xml/>" },
+        { status: 200, body: "%PDF-1.4" },
+      ]);
+      const pac = createPacHttpClient({
+        baseUrl: "https://www.facturapi.io/v2",
+        apiKey: "sk_test_abc",
+        fetchImpl,
+      });
+      await pac.stamp({
+        ...stampInputSample,
+        invoiceId: "22222222-2222-2222-2222-222222222222",
+        invoiceCode: "FAC-B",
+      });
+      const invoiceBody = JSON.parse(
+        captured[1]?.body ?? "{}",
+      ) as Record<string, unknown>;
+      capturedIds.push(String(invoiceBody.external_id));
+    }
+    expect(capturedIds.length).toBe(2);
+    // Las claves externas son DISTINTAS: el segundo stamp NO
+    // colisiona con el primero aunque comparta RFC, importe y
+    // descripción.
+    expect(capturedIds[0]).not.toEqual(capturedIds[1]);
+    expect(capturedIds[0]).toMatch(/^inv:/);
+    expect(capturedIds[1]).toMatch(/^inv:/);
+  });
+
+  it("reintento del mismo invoiceId => external_id estable", async () => {
+    const capturedIds: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const { fetchImpl, captured } = makeFetchMock([
+        { status: 200, body: { id: "cust-stable" } },
+        { status: 200, body: { id: "inv-X", is_ready_to_stamp: true } },
+        { status: 200, body: { id: "inv-X", uuid: "U-X", status: "stamped" } },
+        { status: 200, body: "<xml/>" },
+        { status: 200, body: "%PDF-1.4" },
+      ]);
+      const pac = createPacHttpClient({
+        baseUrl: "https://www.facturapi.io/v2",
+        apiKey: "sk_test_abc",
+        fetchImpl,
+      });
+      await pac.stamp({
+        ...stampInputSample,
+        invoiceId: "33333333-3333-3333-3333-333333333333",
+        invoiceCode: "FAC-X",
+      });
+      const invoiceBody = JSON.parse(
+        captured[1]?.body ?? "{}",
+      ) as Record<string, unknown>;
+      capturedIds.push(String(invoiceBody.external_id));
+    }
+    // Las 3 invocaciones producen el MISMO `external_id` (estable).
+    expect(capturedIds[0]).toEqual(capturedIds[1]);
+    expect(capturedIds[1]).toEqual(capturedIds[2]);
+    expect(capturedIds[0]).toMatch(/^inv:/);
+  });
+
+  it("customer key estable por org+rfc (independiente del invoiceId)", async () => {
+    const customerKeys: string[] = [];
+    for (const invoiceId of [
+      "44444444-4444-4444-4444-444444444444",
+      "55555555-5555-5555-5555-555555555555",
+      "66666666-6666-6666-6666-666666666666",
+    ]) {
+      const { fetchImpl, captured } = makeFetchMock([
+        { status: 200, body: { id: "cust-shared" } },
+        { status: 200, body: { id: `inv-${invoiceId}`, is_ready_to_stamp: true } },
+        { status: 200, body: { id: `inv-${invoiceId}`, uuid: "U-Y", status: "stamped" } },
+        { status: 200, body: "<xml/>" },
+        { status: 200, body: "%PDF-1.4" },
+      ]);
+      const pac = createPacHttpClient({
+        baseUrl: "https://www.facturapi.io/v2",
+        apiKey: "sk_test_abc",
+        fetchImpl,
+      });
+      await pac.stamp({
+        ...stampInputSample,
+        invoiceId,
+      });
+      const customerKey = captured[0]?.headers["Idempotency-Key"];
+      customerKeys.push(String(customerKey));
+    }
+    // Los 3 stamps usan el MISMO `Idempotency-Key` para POST
+    // /customers (cliente compartido: orgId+rfc idénticos).
+    expect(customerKeys[0]).toEqual(customerKeys[1]);
+    expect(customerKeys[1]).toEqual(customerKeys[2]);
+    expect(customerKeys[0]).toMatch(/^cust:/);
+  });
+
+  it("invoiceId ausente en PacStampInput → typecheck falla (campo obligatorio)", () => {
+    // Verificación estática del contrato: el campo `invoiceId` debe
+    // ser obligatorio. Si TypeScript acepta `omit invoiceId`,
+    // significa que el campo es opcional y dos facturas pueden
+    // colisionar — regresión.
+    const idx = readFileSync(
+      path.resolve(__dirname, "../src/server/integrations/pac/index.ts"),
+      "utf8",
+    ).indexOf("export interface PacStampInput");
+    expect(idx).toBeGreaterThan(0);
+    const window = readFileSync(
+      path.resolve(__dirname, "../src/server/integrations/pac/index.ts"),
+      "utf8",
+    ).slice(idx, idx + 1200);
+    // `invoiceId: string` (no `?:` ni `| undefined`).
+    expect(/invoiceId:\s*string;/.test(window)).toBe(true);
+    expect(/invoiceCode:\s*string;/.test(window)).toBe(true);
+  });
+
+  it("`invoices.timbrar` pasa `invoiceId` y `invoiceCode` a `pac.stamp`", () => {
+    // Verificación estática del caller de servicio: el stampInput
+    // construido en `timbrar` (usuario) y el `pac.stamp({...})` en
+    // `timbrarSystem` (job nocturno) incluyen los identificadores
+    // internos `invoiceId` y `invoiceCode` derivados de `row.id`/
+    // `row.code`.
+    const src = readFileSync(
+      path.resolve(
+        __dirname,
+        "../src/server/services/facturacion/invoices.ts",
+      ),
+      "utf8",
+    );
+    // Bloque 1: `const stampInput = {...}` en `timbrar` (usuario).
+    const stampVarPos = src.indexOf("const stampInput = {");
+    expect(stampVarPos).toBeGreaterThan(0);
+    const stampVarBlock = src.slice(stampVarPos, stampVarPos + 1500);
+    expect(/invoiceId:\s*row\.id/.test(stampVarBlock)).toBe(true);
+    expect(/invoiceCode:\s*row\.code/.test(stampVarBlock)).toBe(true);
+    // Bloque 2: `await pac.stamp({...})` en `timbrarSystem` (job).
+    const stampCallPos = src.indexOf("await pac.stamp({");
+    expect(stampCallPos).toBeGreaterThan(0);
+    const stampCallBlock = src.slice(stampCallPos, stampCallPos + 1500);
+    expect(/invoiceId:\s*row\.id/.test(stampCallBlock)).toBe(true);
+    expect(/invoiceCode:\s*row\.code/.test(stampCallBlock)).toBe(true);
   });
 });

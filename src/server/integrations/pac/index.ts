@@ -111,6 +111,16 @@ export interface PacStampInput {
   concepto: PacConcepto;
   /** Total en centavos MXN. */
   totalCents: number;
+  /**
+   * IMPL-20260825-36 (intento 5 · F-12) · Identificador interno
+   * (`invoices.id` UUID) de la factura a timbrar. El adaptador
+   * Facturapi deriva claves de idempotencia únicas por invoice
+   * (`organizationId + invoiceId`) para evitar colisiones cuando
+   * dos facturas distintas comparten mismo RFC/importe.
+   */
+  invoiceId: string;
+  /** Código humano de la factura (`invoices.code`, ej: `FAC-2026-001`). */
+  invoiceCode: string;
 }
 
 export interface PacCancelInput {

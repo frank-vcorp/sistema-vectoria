@@ -306,19 +306,30 @@ export function createPacHttpClient(
   }
 
   async function stamp(input: PacStampInput): Promise<PacStampResult> {
-    // Idempotencia: derivamos `external_id` y `idempotency_key` del
-    // payload del invoice interno. `Idempotency-Key` se envía como
-    // HEADER (estándar HTTP / Stripe); `idempotency_key` también como
-    // BODY (campo documentado de Facturapi para `/invoices`).
-    const externalId = `os:${input.organizationId}:inv:${hashExternalId(input)}`;
+    // IMPL-20260825-36 (intento 5 · F-12) · Idempotencia por
+    // invoiceId (no por RFC+importe). Antes el hash derivaba sólo
+    // de orgId+rfc+claveProdServ+totalCents, lo que provocaba que
+    // dos facturas distintas del mismo cliente/importe colisionaran
+    // con el mismo `external_id` y `idempotency_key`. Ahora la
+    // clave a nivel invoice es única por `organizationId +
+    // invoiceId`. La clave a nivel customer sigue siendo estable
+    // (basada en `orgId+rfc`) porque un mismo cliente puede tener
+    // varias facturas pero un sólo registro en Facturapi.
+    //
+    // `Idempotency-Key` se envía como HEADER (estándar HTTP /
+    // Stripe); `idempotency_key` también como BODY (campo
+    // documentado de Facturapi para `/invoices`).
+    const customerExternalId = buildCustomerExternalId(input);
+    const invoiceExternalId = buildInvoiceExternalId(input);
     const customerBody = buildCustomerBody(input.receptor.rfc, input.receptor);
-    // POST /customers: `Idempotency-Key` header para reintentos seguros.
-    // No usamos `external_id` aquí porque NO está documentado en el
-    // body de POST /customers; el `tax_id` es la clave natural.
+    // POST /customers: `Idempotency-Key` header con clave estable
+    // basada en orgId+rfc. NO usamos `external_id` en body porque NO
+    // está documentado para `POST /customers`; el `tax_id` es la
+    // clave natural.
     const customer = await request<{ id: string }>({
       method: "POST",
       path: "/customers",
-      idempotencyKey: `cust:${externalId}`,
+      idempotencyKey: customerExternalId,
       body: customerBody,
     });
     // POST /invoices con `status: "draft"`: revisión previa al timbrado.
@@ -332,8 +343,8 @@ export function createPacHttpClient(
       payment_form: "01", // Efectivo por defecto; SPEC-008 lo ajustará
       payment_method: "PUE",
       use: input.receptor.cfdiUse ?? "G03",
-      external_id: externalId,
-      idempotency_key: externalId,
+      external_id: invoiceExternalId,
+      idempotency_key: invoiceExternalId,
       status: "draft",
     };
     const draft = await request<{
@@ -343,7 +354,7 @@ export function createPacHttpClient(
     }>({
       method: "POST",
       path: "/invoices",
-      idempotencyKey: externalId,
+      idempotencyKey: invoiceExternalId,
       body: invoiceBody,
     });
     // Facturapi: si `is_ready_to_stamp === false`, faltan datos del
@@ -370,7 +381,7 @@ export function createPacHttpClient(
     }>({
       method: "POST",
       path: `/invoices/${draft.id}/stamp`,
-      idempotencyKey: `${externalId}:stamp`,
+      idempotencyKey: `${invoiceExternalId}:stamp`,
     });
     // 4) UUID CFDI: el body de `/stamp` debería incluir `uuid`, pero
     // para Test algunos escenarios lo devuelven null hasta que la
@@ -667,23 +678,51 @@ function stripTrailingSlash(s: string): string {
 }
 
 /**
- * Hash estable para derivar `external_id` idempotente. Usa sha256 del
- * código de organización + datos del comprobante; trunca a 32 chars
- * hex (suficiente para colisiones cero en una sola org).
+ * IMPL-20260825-36 (intento 5 · F-12) · `external_id` a nivel
+ * CUSTOMER. Estable por `organizationId + rfc` (un mismo cliente
+ * fiscal puede tener N facturas pero un sólo registro en
+ * Facturapi). Reintentos del job sobre la misma factura
+ * reusan el mismo `external_id` y obtienen el mismo `customer.id`.
+ *
+ * El prefijo `cust:` aísla el espacio de claves del de invoices,
+ * evitando colisiones con `external_id` a nivel invoice.
  */
-function hashExternalId(input: PacStampInput): string {
-  // Importación dinámica del módulo `node:crypto` para mantener el
-  // adapter liviano y testeable.
+function buildCustomerExternalId(input: PacStampInput): string {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { createHash } = require("node:crypto") as typeof import("node:crypto");
-  return createHash("sha256")
+  const hash = createHash("sha256")
     .update(input.organizationId)
     .update("|")
     .update(input.receptor.rfc)
-    .update("|")
-    .update(input.concepto.claveProdServ)
-    .update("|")
-    .update(String(input.totalCents))
     .digest("hex")
     .slice(0, 32);
+  return `cust:${hash}`;
+}
+
+/**
+ * IMPL-20260825-36 (intento 5 · F-12) · `external_id` a nivel
+ * INVOICE. Único por `organizationId + invoiceId` (UUID interno
+ * de la factura). El `invoiceCode` humano se incluye para
+ * trazabilidad en logs, NO para el hash (mantiene la
+ * idempotencia estable aunque el código cambie de nombre).
+ *
+ * Antes del intento 5, el hash derivaba de
+ * `orgId+rfc+claveProdServ+totalCents`, lo que provocaba que dos
+ * facturas distintas del mismo cliente/importe recibieran el
+ * mismo `external_id` y colisionaran con `409 Conflict` en
+ * `POST /v2/invoices`. Con la nueva clave, cada invoiceId tiene
+ * su propio recurso en Facturapi y los reintentos del job
+ * nocturno sobre la misma factura devuelven el mismo `id` sin
+ * crear duplicados.
+ */
+function buildInvoiceExternalId(input: PacStampInput): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  const hash = createHash("sha256")
+    .update(input.organizationId)
+    .update("|")
+    .update(input.invoiceId)
+    .digest("hex")
+    .slice(0, 32);
+  return `inv:${hash}`;
 }
