@@ -48,6 +48,25 @@
  *  - AC-8 · No regresión: cards previas intactas (assignPL, setOC,
  *    authorize, pause, cancel, markDelivered, markInExecution,
  *    createProject, closeAdmin).
+ *
+ * ─── Intento 2 (QA-20260825-34 FAIL) ───────────────────────────────────────
+ *  - AC-9 · Cadena `clientes.fiscal.upsert` ANTES de
+ *    `facturacion.buildFromOrder`; si upsert falla, build NO se
+ *    llama; errores de upsert caen en `createInvoiceError` (visible
+ *    fuera del diálogo).
+ *  - AC-10 · Mapeo `INVOICE_FISCAL_DATA_REQUIRED` → mensaje canónico
+ *    `createInvoiceFiscalMissing` con `role="alert"` arriba del Card.
+ *  - AC-11 · Valor unitario derivado del SUBTOTAL NETO
+ *    (`quote.subtotalCents`); no se usa `soldTotalCents` (bruto) como
+ *    `valorUnitarioCents`. Si la cotización no expone subtotal, fallback
+ *    a `soldTotalCents` con warning visible.
+ *  - AC-12 · Validación cliente: RFC formato
+ *    `^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$`, RFC+razón+regimen obligatorios;
+ *    no se llama upsert ni build si faltan.
+ *  - AC-13 · Banner de error `role="alert"` con `z-[60]` (por encima
+ *    del overlay `z-50` del diálogo); el error NO queda ocluido.
+ *  - AC-14 · Diálogo captura RFC, razón social, régimen y CFDI use
+ *    pre-rellenados de `clientes.fiscal.getForClient`.
  */
 import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
@@ -205,10 +224,29 @@ describe("IMPL-20260825-34 · AC-2 · handler usa UUID real + soldTotalCents, si
     );
   });
 
-  it("la UI deriva el valor unitario inicial de `o.soldTotalCents` (no se pide manual)", () => {
-    // El diálogo recibe `unitPriceCents={o.soldTotalCents}` como prop
-    // y lo usa como estado inicial; NO hay un input con id="*-uuid-*"".
-    expect(/unitPriceCents=\{o\.soldTotalCents\}/.test(detail)).toBe(true);
+  it("la UI deriva el valor unitario inicial del SUBTOTAL NETO de la cotización (no de `soldTotalCents`, que es bruto)", () => {
+    // IMPL-20260825-34 (intento 2) · Anti doble-IVA. `o.soldTotalCents`
+    // es el total bruto post-IVA; pasarlo como `valorUnitarioCents`
+    // provocaría que `buildCfdiConcept` añadiera un segundo 16%.
+    // Por eso la UI consulta `comercial.cotizaciones.byId({ id: o.cotizacionId })`
+    // y usa `quote.subtotalCents` (neto) como valor unitario. Si la
+    // cotización no expone `subtotalCents`, se hace fallback a
+    // `soldTotalCents` con warning visible (no silencioso).
+    expect(
+      /trpc\.comercial\.cotizaciones\.byId\.useQuery\(\s*\{\s*id:\s*o\.cotizacionId\s*\}/.test(
+        detailCode,
+      ),
+    ).toBe(true);
+    // Subtotal neto explícitamente preferido sobre el total bruto.
+    expect(/quoteQuery\.data\?\.subtotalCents/.test(detail)).toBe(true);
+    expect(/invoiceUnitPriceCents\.value/.test(detail)).toBe(true);
+    expect(
+      /unitPriceCents=\{invoiceUnitPriceCents\.value\}/.test(detail),
+    ).toBe(true);
+    // El diálogo ya NO recibe `unitPriceCents={o.soldTotalCents}`
+    // (eso era el camino del intento 1 que producía doble IVA).
+    expect(/unitPriceCents=\{o\.soldTotalCents\}/.test(detail)).toBe(false);
+    // NO hay un input con id="*-uuid-*"".
     expect(/id=["'][^"']*-uuid-os["']/.test(detail)).toBe(false);
     expect(/id=["'][^"']*-order-id["']/.test(detail)).toBe(false);
   });
@@ -418,10 +456,22 @@ describe("IMPL-20260825-34 · AC-5 · errores canónicos mapeados (role=alert)",
   });
 
   it("los errores UI llevan `role=\"alert\"`", () => {
-    const blockStart = detail.indexOf("createInvoiceError ?");
-    expect(blockStart).toBeGreaterThan(0);
-    const block = detail.slice(blockStart, blockStart + 800);
-    expect(/role=["']alert["']/.test(block)).toBe(true);
+    // IMPL-20260825-34 (intento 2) · El banner de error se renderiza
+    // FUERA del Card (arriba del Card) con `z-[60]` para quedar
+    // visible por encima del overlay del diálogo (`z-50`). El
+    // detalle local de campo (validación de formulario) sigue
+    // dentro del diálogo con su propio `role="alert"`.
+    // Banner externo: aparece con guard `createInvoiceError && (o.status === "delivered" || o.status === "closed")`
+    expect(/createInvoiceError\s*&&\s*\(o\.status/.test(detail)).toBe(true);
+    expect(/role=["']alert["']/.test(detail)).toBe(true);
+    expect(/aria-live=["']assertive["']/.test(detail)).toBe(true);
+    // `z-[60]` para quedar encima del overlay (`z-50`).
+    expect(/z-\[60\]/.test(detail)).toBe(true);
+    // El banner referencia el data-testid canónico
+    // `orden-detail-create-invoice-error`.
+    expect(
+      /data-testid=["']orden-detail-create-invoice-error["']/.test(detail),
+    ).toBe(true);
     // Errores de validación del diálogo también llevan role=alert.
     const dialogErrStart = detail.indexOf(
       "orden-detail-create-invoice-dialog-error",
@@ -537,6 +587,382 @@ describe("IMPL-20260825-34 · AC-7 · contrato `facturacion.buildFromOrder`", ()
         routerSrc,
       ),
     ).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-9 (intento 2) · Cadena upsert → build; build NO se llama si upsert falla
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-34 · AC-9 · cadena upsert→build; build no se llama si upsert falla", () => {
+  it("existe `fiscalUpsert = trpc.clientes.fiscal.upsert.useMutation`", () => {
+    expect(
+      /trpc\.clientes\.fiscal\.upsert\.useMutation/.test(detail),
+    ).toBe(true);
+  });
+
+  it("existen queries `cotizaciones.byId` y `clientes.fiscal.getForClient`", () => {
+    expect(
+      /trpc\.comercial\.cotizaciones\.byId\.useQuery/.test(detail),
+    ).toBe(true);
+    expect(
+      /trpc\.clientes\.fiscal\.getForClient\.useQuery/.test(detail),
+    ).toBe(true);
+  });
+
+  it("el handler del diálogo llama `fiscalUpsert.mutate` ANTES de `buildInvoiceDraft.mutate`", () => {
+    // La cadena es upsert → build. Extraemos el bloque del handler
+    // `onSubmit` por balanceo de llaves (sin strings anidados con
+    // llaves balanceadas en este código).
+    const dialogStart = detail.indexOf(
+      "function CreateInvoiceDraftDialog",
+    );
+    expect(dialogStart).toBeGreaterThan(0);
+    // El handler del padre está en el JSX, antes del componente.
+    // Buscamos el bloque `onSubmit={async (input) => { ... }}`.
+    const submitArrow = detail.indexOf(
+      "onSubmit={async (input) => {",
+    );
+    expect(submitArrow).toBeGreaterThan(0);
+    let depth = 0;
+    let startBlock = -1;
+    let i = submitArrow;
+    while (i < detail.length) {
+      const ch = detail[i];
+      if (ch === "{") {
+        if (startBlock === -1) startBlock = i;
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (startBlock !== -1 && depth === 0) {
+          break;
+        }
+      }
+      i++;
+    }
+    expect(startBlock).toBeGreaterThan(0);
+    const handler = detail.slice(startBlock, i + 1);
+    // Orden estricto: `fiscalUpsert.mutate(...)` aparece antes que
+    // `buildInvoiceDraft.mutate(...)`.
+    const upsertPos = handler.indexOf("fiscalUpsert.mutate(");
+    const buildPos = handler.indexOf("buildInvoiceDraft.mutate(");
+    expect(upsertPos).toBeGreaterThan(0);
+    expect(buildPos).toBeGreaterThan(upsertPos);
+    // El bloque usa `await new Promise<void>(...)` para secuenciar.
+    expect(
+      /await new Promise<void>\(\s*\(resolve, reject\)\s*=>\s*\{/.test(
+        handler,
+      ),
+    ).toBe(true);
+  });
+
+  it("si `fiscalUpsert` falla, `buildInvoiceDraft` NO se llama (rechazo en `onError`)", () => {
+    // El `onError` del upsert llama `reject(err)` y NUNCA resuelve,
+    // de modo que `await new Promise(...)` rechaza y el flujo sale
+    // por el `finally` sin disparar `buildInvoiceDraft.mutate`.
+    const submitArrow = detail.indexOf(
+      "onSubmit={async (input) => {",
+    );
+    expect(submitArrow).toBeGreaterThan(0);
+    let depth = 0;
+    let startBlock = -1;
+    let i = submitArrow;
+    while (i < detail.length) {
+      const ch = detail[i];
+      if (ch === "{") {
+        if (startBlock === -1) startBlock = i;
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (startBlock !== -1 && depth === 0) {
+          break;
+        }
+      }
+      i++;
+    }
+    const handler = detail.slice(startBlock, i + 1);
+    // El `onError` del upsert debe llamar `reject(err)`.
+    expect(/onError:\s*\(err\)\s*=>\s*\{[\s\S]*?reject\(err\)/.test(handler)).toBe(
+      true,
+    );
+  });
+
+  it("errores de `fiscalUpsert` mapean a `createInvoiceError*` y NO a `createInvoiceFieldError`", () => {
+    // Errores del upsert deben caer en `createInvoiceError` (visible
+    // fuera del diálogo), NO en `createInvoiceFieldError` (ocluso).
+    const submitArrow = detail.indexOf(
+      "onSubmit={async (input) => {",
+    );
+    expect(submitArrow).toBeGreaterThan(0);
+    let depth = 0;
+    let startBlock = -1;
+    let i = submitArrow;
+    while (i < detail.length) {
+      const ch = detail[i];
+      if (ch === "{") {
+        if (startBlock === -1) startBlock = i;
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (startBlock !== -1 && depth === 0) break;
+      }
+      i++;
+    }
+    const handler = detail.slice(startBlock, i + 1);
+    // En el `onError` del upsert se usa `setCreateInvoiceError` con
+    // uno de los mensajes canónicos (no `setCreateInvoiceFieldError`).
+    expect(/setCreateInvoiceError\(/.test(handler)).toBe(true);
+    expect(/createInvoiceFiscalUpsertError/.test(handler)).toBe(true);
+    expect(/createInvoiceErrorForbidden/.test(handler)).toBe(true);
+    expect(/createInvoiceErrorNotFound/.test(handler)).toBe(true);
+  });
+
+  it("`RFC_DUPLICATE` del upsert mapea a `createInvoiceFiscalInvalidRFC`", () => {
+    expect(/["']RFC_DUPLICATE["']/.test(detail)).toBe(true);
+    expect(/createInvoiceFiscalInvalidRFC/.test(detail)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-10 (intento 2) · INVOICE_FISCAL_DATA_REQUIRED → mensaje canónico
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-34 · AC-10 · INVOICE_FISCAL_DATA_REQUIRED mapeado", () => {
+  it("`onError` de `buildInvoiceDraft` mapea `INVOICE_FISCAL_DATA_REQUIRED` a `createInvoiceFiscalMissing`", () => {
+    // El helper `loadClientWithFiscal` del servicio emite
+    // `INVOICE_FISCAL_DATA_REQUIRED` (409) si el cliente no tiene
+    // RFC/razón social/régimen. La UI lo mapea explícitamente.
+    expect(/["']INVOICE_FISCAL_DATA_REQUIRED["']/.test(detail)).toBe(true);
+    expect(/createInvoiceFiscalMissing/.test(detail)).toBe(true);
+  });
+
+  it("el servicio emite `INVOICE_FISCAL_DATA_REQUIRED` (verificación de contrato)", () => {
+    const invoicesService = readSrc(
+      path.resolve(
+        __dirname,
+        "../src/server/services/facturacion/invoices.ts",
+      ),
+    );
+    expect(/INVOICE_FISCAL_DATA_REQUIRED/.test(invoicesService)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-11 (intento 2) · Valor unitario = quote.subtotalCents, no soldTotalCents
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-34 · AC-11 · no doble IVA: unitario = quote.subtotalCents", () => {
+  it("`invoiceUnitPriceCents` prefiere `quoteQuery.data.subtotalCents`", () => {
+    expect(
+      /if\s*\(quoteQuery\.data\?\.subtotalCents\s*!=\s*null\)/.test(detail),
+    ).toBe(true);
+    expect(
+      /quoteQuery\.data\.subtotalCents/.test(detail),
+    ).toBe(true);
+  });
+
+  it("si la cotización no expone subtotal, fallback a `soldTotalCents` con warning visible", () => {
+    // El fallback debe ser explícito y acompañado de un mensaje de
+    // advertencia visible en el diálogo (`createInvoiceQuoteSubtotalFallback`).
+    expect(/soldTotalCents/.test(detail)).toBe(true);
+    expect(/createInvoiceQuoteSubtotalFallback/.test(messages)).toBe(true);
+    // El diálogo debe mostrar el warning cuando `unitPriceSource !== "quote"`.
+    expect(/unitPriceSource\s*!==\s*["']quote["']/.test(detail)).toBe(true);
+  });
+
+  it("no se divide entre 1.16 (precio neto = total / 1.16) — se usa subtotal directo", () => {
+    // Defensa anti-doble-IVA: la UI NO aplica el inverso del IVA
+    // sobre `soldTotalCents`. Usa el subtotal de la cotización
+    // directamente (camino canónico). Si alguna vez se añadiera un
+    // fallback por cálculo, este test debería romperse para forzar
+    // revisión.
+    expect(/soldTotalCents\s*\/\s*1\.16/.test(detail)).toBe(false);
+    expect(/Math\.round\(.*?1\.16/.test(detail)).toBe(false);
+  });
+
+  it("el valor unitario se pasa a `buildFromOrder` como `valorUnitarioCents` (no se multiplica por IVA)", () => {
+    // El bloque `mutate({...})` debe enviar `valorUnitarioCents` con
+    // el mismo valor que `input.valorUnitarioCents` (el subtotal
+    // neto), sin transformación adicional.
+    const mutateMatch = detailCode.match(
+      /buildInvoiceDraft\.mutate\(\{[\s\S]*?\}\)/,
+    );
+    expect(mutateMatch).not.toBeNull();
+    const block = mutateMatch![0];
+    expect(/valorUnitarioCents:\s*input\.valorUnitarioCents/.test(block)).toBe(
+      true,
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-12 (intento 2) · Validación cliente RFC + razón social + regimen
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-34 · AC-12 · validación cliente RFC + fiscal", () => {
+  it("el handler valida RFC con regex `^[A-ZÑ&]{3,4}\\d{6}[A-Z0-9]{3}$`", () => {
+    // El regex literal en el archivo es `/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/u`.
+    // Buscamos los anclajes y cuantificadores canónicos sin
+    // escapar la `^` (en JS regex literal la `^` no se escapa).
+    expect(/\^?\[A-ZÑ&\]\{3,4\}\\d\{6\}\[A-Z0-9\]\{3\}\$/.test(detail)).toBe(
+      true,
+    );
+    expect(/\{3,4\}/.test(detail)).toBe(true);
+    expect(/\\d\{6\}/.test(detail)).toBe(true);
+    expect(/\[A-Z0-9\]\{3\}\$/.test(detail)).toBe(true);
+    expect(/\/u(?:\.test|\.exec|\.match)?/.test(detail)).toBe(true);
+  });
+
+  it("el handler exige RFC + razonSocial + regimen no vacíos antes de upsert", () => {
+    expect(/if\s*\(\s*!rfc\s*\|\|\s*!razonSocialTrim\s*\|\|\s*!regimen\s*\)/.test(detail)).toBe(
+      true,
+    );
+  });
+
+  it("si faltan datos fiscales, se setea `createInvoiceFiscalMissing` (no `createInvoiceFieldError`)", () => {
+    const submitArrow = detail.indexOf(
+      "onSubmit={async (input) => {",
+    );
+    expect(submitArrow).toBeGreaterThan(0);
+    let depth = 0;
+    let startBlock = -1;
+    let i = submitArrow;
+    while (i < detail.length) {
+      const ch = detail[i];
+      if (ch === "{") {
+        if (startBlock === -1) startBlock = i;
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (startBlock !== -1 && depth === 0) break;
+      }
+      i++;
+    }
+    const handler = detail.slice(startBlock, i + 1);
+    expect(
+      /setCreateInvoiceError\(\s*messages\.ordenes\.createInvoiceFiscalMissing[^)]*\)/.test(
+        handler,
+      ),
+    ).toBe(true);
+  });
+
+  it("el botón de submit se deshabilita si faltan RFC/razón/regimen", () => {
+    expect(
+      /disabled=\{[\s\S]*?razonSocial\.trim\(\)\.length\s*===\s*0/.test(
+        detail,
+      ),
+    ).toBe(true);
+    expect(
+      /disabled=\{[\s\S]*?regimen\.trim\(\)\.length\s*===\s*0/.test(
+        detail,
+      ),
+    ).toBe(true);
+    expect(
+      /disabled=\{[\s\S]*?rfc\.trim\(\)\.length\s*===\s*0/.test(detail),
+    ).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-13 (intento 2) · Banner OUTSIDE/ABOVE con z-[60] sobre overlay z-50
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-34 · AC-13 · banner de error fuera del diálogo con z-[60]", () => {
+  it("el banner está en el nivel del padre, NO dentro del `<Card>` del flujo", () => {
+    // El banner debe aparecer como hermano del Card, antes del Card
+    // en el árbol (no dentro del CardContent). Usamos la posición
+    // del data-testid y verificamos que NO está dentro de la zona
+    // `<Card data-testid=\"orden-detail-create-invoice\">`.
+    const cardStart = detail.indexOf(
+      'data-testid="orden-detail-create-invoice"',
+    );
+    const errorBannerStart = detail.indexOf(
+      'data-testid="orden-detail-create-invoice-error"',
+    );
+    expect(cardStart).toBeGreaterThan(0);
+    expect(errorBannerStart).toBeGreaterThan(0);
+    // El banner aparece en dos sitios: el `<div>` padre (antes del
+    // Card) Y dentro del flujo del diálogo. El externo es el que
+    // aparece con `z-[60]` y el banner interno no debe tener z-60.
+    // El externo debe estar ANTES del Card en orden de aparición
+    // en el JSX (renderizado fuera del Card).
+    const cardOpening = detail.lastIndexOf("<Card", cardStart);
+    // El bloque JSX del banner externo aparece inmediatamente antes
+    // de `<Card data-testid=\"orden-detail-create-invoice\">`.
+    const beforeCard = detail.slice(
+      Math.max(0, cardOpening - 2000),
+      cardOpening,
+    );
+    expect(/z-\[60\]/.test(beforeCard)).toBe(true);
+    expect(/createInvoiceError/.test(beforeCard)).toBe(true);
+  });
+
+  it("el banner externo usa `role=\"alert\"` y `aria-live=\"assertive\"`", () => {
+    const cardOpening = detail.lastIndexOf(
+      "<Card",
+      detail.indexOf('data-testid="orden-detail-create-invoice"'),
+    );
+    const beforeCard = detail.slice(
+      Math.max(0, cardOpening - 2000),
+      cardOpening,
+    );
+    expect(/role=["']alert["']/.test(beforeCard)).toBe(true);
+    expect(/aria-live=["']assertive["']/.test(beforeCard)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-14 (intento 2) · Diálogo captura RFC/razón/regimen/CFDI use
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-34 · AC-14 · diálogo captura datos fiscales", () => {
+  it("el diálogo tiene campos para RFC, razón social, régimen y CFDI use", () => {
+    for (const id of [
+      "ci-rfc",
+      "ci-razon",
+      "ci-regimen",
+      "ci-cfdi-use",
+    ]) {
+      expect(new RegExp(`id=["']${id}["']`).test(detail)).toBe(true);
+      expect(new RegExp(`htmlFor=["']${id}["']`).test(detail)).toBe(true);
+    }
+  });
+
+  it("los campos se pre-rellenan con `clientes.fiscal.getForClient`", () => {
+    // El padre pasa `fiscalPreFill={{ rfc, razonSocial, regimen, cfdiUse }}`
+    // derivado de la query `fiscalQuery.data`. El diálogo usa
+    // `useState(fiscalPreFill.rfc)` etc. y un `useEffect` que
+    // sincroniza cuando cambian.
+    expect(/fiscalPreFill=\{[\s\S]*?razonSocial:\s*fiscalQuery\.data\?\.razonSocial/.test(detail)).toBe(
+      true,
+    );
+    expect(/fiscalQuery\.data\?\.rfc/.test(detail)).toBe(true);
+    expect(/fiscalQuery\.data\?\.regimen/.test(detail)).toBe(true);
+    expect(/fiscalQuery\.data\?\.cfdiUse/.test(detail)).toBe(true);
+  });
+
+  it("`clientId` real del padre se pasa al diálogo (no se pide manual)", () => {
+    expect(/clientId=\{o\.clientId\}/.test(detail)).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC-15 (intento 2) · Mensajes `createInvoiceFiscal*` en `messages.ts`
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("IMPL-20260825-34 · AC-15 · mensajes `createInvoiceFiscal*` y `createInvoiceQuoteSubtotalFallback`", () => {
+  it("existen las claves de mensajes fiscales", () => {
+    for (const key of [
+      "createInvoiceFiscalSectionTitle",
+      "createInvoiceFiscalSectionHelp",
+      "createInvoiceFiscalMissing",
+      "createInvoiceFiscalUpsertError",
+      "createInvoiceFiscalInvalidRFC",
+      "createInvoiceQuoteMissing",
+      "createInvoiceQuoteSubtotalFallback",
+    ]) {
+      expect(new RegExp(`${key}:`).test(messages)).toBe(true);
+    }
   });
 });
 

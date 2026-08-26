@@ -149,6 +149,15 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
         setCreateInvoiceError(messages.ordenes.createInvoiceErrorNotFound);
         return;
       }
+      // IMPL-20260825-34 (intento 2) · BR-N218: el cliente no tiene
+      // RFC/razón social/régimen capturados. El error se muestra
+      // fuera del diálogo (banner arriba del Card) para que el
+      // usuario pueda reabrir y completar el formulario, sin que
+      // el mensaje quede ocluido por el overlay del modal.
+      if (code === "INVOICE_FISCAL_DATA_REQUIRED") {
+        setCreateInvoiceError(messages.ordenes.createInvoiceFiscalMissing);
+        return;
+      }
       if (code === "ORDER_NOT_DELIVERABLE" || code === "INVOICE_BUILD_INVALID") {
         setCreateInvoiceError(messages.ordenes.createInvoiceErrorTransition);
         return;
@@ -267,11 +276,16 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
     string | null
   >(null);
   // IMPL-20260825-34 · Estado local del flujo "Crear factura borrador"
-  // (SPEC-20260817-007 BR-N301/BR-N218). Conserva sólo en memoria
-  // mientras la sesión del usuario sigue activa. El formulario envía
-  // la fecha de vencimiento (validada en cliente) y la descripción;
-  // el valor unitario se deriva de `o.soldTotalCents` (no editable,
-  // para que la línea inicial refleje el monto real de la OS).
+  // (SPEC-20260817-007 BR-N301/BR-N218, intento 2). Conserva sólo en
+  // memoria mientras la sesión del usuario sigue activa. El valor
+  // unitario se deriva del SUBTOTAL NETO de la cotización
+  // (`quote.subtotalCents`), NO de `o.soldTotalCents` (que es total
+  // bruto post-IVA): si se pasara el bruto como `valorUnitarioCents`,
+  // `buildCfdiConcept` añadiría un segundo 16% y produciría doble IVA.
+  // Antes de armar el comprobante se persisten los datos fiscales del
+  // cliente (`clientes.fiscal.upsert`) para evitar el 409
+  // `INVOICE_FISCAL_DATA_REQUIRED`. Si upsert falla, NO se llama
+  // `buildFromOrder`.
   const [createInvoiceOpen, setCreateInvoiceOpen] = React.useState(false);
   const defaultDueDate = React.useMemo(() => {
     const d = new Date();
@@ -295,6 +309,10 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
   const [createInvoiceError, setCreateInvoiceError] = React.useState<
     string | null
   >(null);
+  // IMPL-20260825-34 intento 2 · Estado del upsert fiscal: bandera
+  // para evitar doble submit y conservar el último error de upsert
+  // en `createInvoiceError` (visible fuera del diálogo).
+  const [fiscalSubmitting, setFiscalSubmitting] = React.useState(false);
 
   if (detail.isLoading) {
     return (
@@ -321,6 +339,44 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
 
   const o = detail.data;
   const pf = preflight.data;
+
+  // IMPL-20260825-34 (intento 2) · Datos fiscales del cliente
+  // (BR-N218) y subtotal neto de la cotización. El detalle de OS no
+  // expone `subtotalCents` directamente, así que consultamos
+  // `comercial.cotizaciones.byId` para derivar el valor unitario de
+  // la línea inicial del CFDI sin doble IVA. La consulta de fiscal
+  // pre-rellena el formulario (RFC, razón social, régimen) para que
+  // el usuario sólo confirme o ajuste.
+  const quoteQuery = trpc.comercial.cotizaciones.byId.useQuery(
+    { id: o.cotizacionId },
+    { enabled: o.status === "delivered" || o.status === "closed" },
+  );
+  const fiscalQuery = trpc.clientes.fiscal.getForClient.useQuery(
+    { clientId: o.clientId },
+    { enabled: o.status === "delivered" || o.status === "closed" },
+  );
+  const fiscalUpsert = trpc.clientes.fiscal.upsert.useMutation({
+    onSuccess: () => {
+      // Invalida `getForClient` para que el siguiente intento pre-rellene
+      // con los datos persistidos. NO toca `buildFromOrder` aún: el
+      // padre orquesta la cadena upsert→build.
+      utils.clientes.fiscal.getForClient.invalidate({ clientId: o.clientId });
+    },
+  });
+  // Subtotal neto del CFDI: preferir `quote.subtotalCents` (neto,
+  // pre-IVA). Si la cotización aún no está disponible o no tiene
+  // `subtotalCents`, hacemos fallback a `o.soldTotalCents` (total
+  // bruto post-IVA) sólo como contingencia operacional y marcamos
+  // explícitamente la advertencia para evitar doble IVA silencioso.
+  const invoiceUnitPriceCents = (() => {
+    if (quoteQuery.data?.subtotalCents != null) {
+      return { value: quoteQuery.data.subtotalCents, source: "quote" as const };
+    }
+    if (typeof o.soldTotalCents === "number") {
+      return { value: o.soldTotalCents, source: "soldTotal" as const };
+    }
+    return { value: 0, source: "unknown" as const };
+  })();
   const canAuthorize = !!pf?.canAuthorize;
 
   return (
@@ -740,6 +796,25 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
         </Card>
       ) : null}
 
+      {/* IMPL-20260825-34 (intento 2) · Banner de error GLOBAL del
+          flujo "Crear factura borrador". Se renderiza ARRIBA del Card
+          (no adentro del Card ni del diálogo) y con `z-[60]` para
+          quedar visible por encima del overlay del diálogo
+          (`z-50`). Cubre: `INVOICE_FISCAL_DATA_REQUIRED`, errores
+          de `clientes.fiscal.upsert` y errores de
+          `facturacion.buildFromOrder`. Sin esto el error quedaría
+          ocluido por el modal y el usuario vería "falso éxito". */}
+      {(createInvoiceError && (o.status === "delivered" || o.status === "closed")) ? (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="fixed left-1/2 top-4 z-[60] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive shadow-lg"
+          data-testid="orden-detail-create-invoice-error"
+        >
+          {createInvoiceError}
+        </div>
+      ) : null}
+
       {/* IMPL-20260825-34 · Crear factura borrador desde OS `delivered`
           o `closed` (SPEC-20260817-007 BR-N301/BR-N218). Sólo se
           renderiza cuando `o.status === "delivered"` o `o.status ===
@@ -783,15 +858,6 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
                 ? messages.ordenes.createInvoiceSubmitting
                 : messages.ordenes.createInvoiceAction}
             </Button>
-            {createInvoiceError ? (
-              <p
-                role="alert"
-                className="text-sm text-destructive"
-                data-testid="orden-detail-create-invoice-error"
-              >
-                {createInvoiceError}
-              </p>
-            ) : null}
             {createdInvoice ? (
               <div
                 role="status"
@@ -858,12 +924,20 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
       {createInvoiceOpen ? (
         <CreateInvoiceDraftDialog
           orderId={o.id}
+          clientId={o.clientId}
           orderCode={o.code}
-          unitPriceCents={o.soldTotalCents}
+          unitPriceCents={invoiceUnitPriceCents.value}
+          unitPriceSource={invoiceUnitPriceCents.source}
+          fiscalPreFill={{
+            rfc: fiscalQuery.data?.rfc ?? "",
+            razonSocial: fiscalQuery.data?.razonSocial ?? "",
+            regimen: fiscalQuery.data?.regimen ?? "",
+            cfdiUse: fiscalQuery.data?.cfdiUse ?? "",
+          }}
           defaultDueDate={defaultDueDate}
           defaultDescription={createInvoiceDescription}
-          submitting={buildInvoiceDraft.isPending}
-          onSubmit={(input) => {
+          submitting={buildInvoiceDraft.isPending || fiscalUpsert.isPending || fiscalSubmitting}
+          onSubmit={async (input) => {
             setCreateInvoiceFieldError(null);
             setCreateInvoiceError(null);
             // Validación de vigencia en cliente antes de salir al
@@ -905,21 +979,96 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
               );
               return;
             }
-            buildInvoiceDraft.mutate({
-              orderId: id,
-              dueDate: input.dueDate,
-              concept: [
-                {
-                  claveProdServ: "84111506",
-                  descripcion: input.descripcion.trim(),
-                  cantidad: 1,
-                  valorUnitarioCents: input.valorUnitarioCents,
-                },
-              ],
-            });
+            // Validación fiscal: RFC, razón social y régimen son
+            // obligatorios para `buildFromOrder` (BR-N218). Si
+            // faltan, no llegamos a `build` y marcamos error visible
+            // fuera del diálogo (banner arriba del Card).
+            const rfc = (input.rfc ?? "").trim().toUpperCase();
+            const razonSocialTrim = (input.razonSocial ?? "").trim();
+            const regimen = (input.regimen ?? "").trim();
+            const cfdiUse = (input.cfdiUse ?? "").trim();
+            if (!rfc || !razonSocialTrim || !regimen) {
+              setCreateInvoiceError(
+                messages.ordenes.createInvoiceFiscalMissing,
+              );
+              return;
+            }
+            // RFC: 3-4 letras + 6 dígitos + 3 alfanuméricos.
+            if (!/^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/u.test(rfc)) {
+              setCreateInvoiceError(
+                messages.ordenes.createInvoiceFiscalInvalidRFC,
+              );
+              return;
+            }
+            // IMPL-20260825-34 (intento 2) · Cadena upsert → build.
+            // Si `fiscalUpsert` falla, NO se llama `buildInvoiceDraft`.
+            // El error del upsert (visible en `createInvoiceError` por
+            // `onError` abajo) NO queda ocluido por el diálogo.
+            setFiscalSubmitting(true);
+            try {
+              await new Promise<void>((resolve, reject) => {
+                fiscalUpsert.mutate(
+                  {
+                    clientId: o.clientId,
+                    rfc,
+                    razonSocial: razonSocialTrim,
+                    regimen,
+                    ...(cfdiUse ? { cfdiUse } : {}),
+                  },
+                  {
+                    onSuccess: () => resolve(),
+                    onError: (err) => {
+                      const code = err.data?.code ?? null;
+                      if (code === "FORBIDDEN" || code === "UNAUTHORIZED") {
+                        setCreateInvoiceError(
+                          messages.ordenes.createInvoiceErrorForbidden,
+                        );
+                      } else if (
+                        code === "CLIENT_NOT_FOUND" ||
+                        code === "ORDER_NOT_FOUND"
+                      ) {
+                        setCreateInvoiceError(
+                          messages.ordenes.createInvoiceErrorNotFound,
+                        );
+                      } else if (code === "RFC_DUPLICATE") {
+                        setCreateInvoiceError(
+                          messages.ordenes.createInvoiceFiscalInvalidRFC,
+                        );
+                      } else {
+                        setCreateInvoiceError(
+                          err.message ??
+                            messages.ordenes.createInvoiceFiscalUpsertError,
+                        );
+                      }
+                      reject(err);
+                    },
+                  },
+                );
+              });
+              // Sólo después de upsert exitoso se llama `build`.
+              buildInvoiceDraft.mutate({
+                orderId: id,
+                dueDate: input.dueDate,
+                concept: [
+                  {
+                    claveProdServ: "84111506",
+                    descripcion: input.descripcion.trim(),
+                    cantidad: 1,
+                    // Subtotal NETO de la cotización (no bruto). Si
+                    // por alguna razón la cotización no expone
+                    // `subtotalCents`, se hace fallback a
+                    // `soldTotalCents` (warning visible arriba del
+                    // Card); pero el camino por defecto es net.
+                    valorUnitarioCents: input.valorUnitarioCents,
+                  },
+                ],
+              });
+            } finally {
+              setFiscalSubmitting(false);
+            }
           }}
           onClose={() => {
-            if (buildInvoiceDraft.isPending) return;
+            if (buildInvoiceDraft.isPending || fiscalUpsert.isPending || fiscalSubmitting) return;
             setCreateInvoiceOpen(false);
             setCreateInvoiceFieldError(null);
           }}
@@ -932,15 +1081,23 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
 
 /**
  * IMPL-20260825-34 · Diálogo accesible para armar la factura borrador
- * (SPEC-20260817-007 BR-N301). El formulario NO pide UUID manual:
- * `orderId` se recibe del padre. El valor unitario inicial se deriva
- * del `soldTotalCents` real de la OS (qty 1), con descripción
- * pre-llenada configurable. NO abre `window.prompt` ni accede a BD.
+ * (SPEC-20260817-007 BR-N301/BR-N218). El formulario NO pide UUID
+ * manual: `orderId` y `clientId` se reciben del padre. El valor
+ * unitario inicial se deriva del SUBTOTAL NETO de la cotización
+ * (`unitPriceSource === "quote"`); sólo como fallback se usa
+ * `soldTotalCents` (visible en UI con warning). El diálogo captura
+ * RFC, razón social y régimen del cliente (BR-N218) ANTES de
+ * armar el comprobante, para evitar 409
+ * `INVOICE_FISCAL_DATA_REQUIRED`. NO abre `window.prompt` ni accede
+ * a BD.
  */
 function CreateInvoiceDraftDialog({
   orderId,
+  clientId,
   orderCode,
   unitPriceCents,
+  unitPriceSource,
+  fiscalPreFill,
   defaultDueDate,
   defaultDescription,
   submitting,
@@ -949,8 +1106,16 @@ function CreateInvoiceDraftDialog({
   onClose,
 }: {
   orderId: string;
+  clientId: string;
   orderCode: string;
   unitPriceCents: number;
+  unitPriceSource: "quote" | "soldTotal" | "unknown";
+  fiscalPreFill: {
+    rfc: string;
+    razonSocial: string;
+    regimen: string;
+    cfdiUse: string;
+  };
   defaultDueDate: string;
   defaultDescription: string;
   submitting: boolean;
@@ -959,18 +1124,39 @@ function CreateInvoiceDraftDialog({
     dueDate: string;
     descripcion: string;
     valorUnitarioCents: number;
-  }) => void;
+    rfc: string;
+    razonSocial: string;
+    regimen: string;
+    cfdiUse: string;
+  }) => void | Promise<void>;
   onClose: () => void;
 }) {
   const [dueDate, setDueDate] = React.useState(defaultDueDate);
   const [descripcion, setDescripcion] = React.useState(defaultDescription);
   const [valorUnitarioCents, setValorUnitarioCents] =
     React.useState(unitPriceCents);
-  // Sincroniza el valor unitario inicial cuando la OS padre cambia
-  // (no editable en este corte: la línea inicial refleja la OS).
+  const [rfc, setRfc] = React.useState(fiscalPreFill.rfc);
+  const [razonSocial, setRazonSocial] = React.useState(
+    fiscalPreFill.razonSocial,
+  );
+  const [regimen, setRegimen] = React.useState(fiscalPreFill.regimen);
+  const [cfdiUse, setCfdiUse] = React.useState(fiscalPreFill.cfdiUse);
+  // Sincroniza el valor unitario y los datos fiscales cuando el
+  // padre los actualiza (ej. tras refetch de la cotización).
   React.useEffect(() => {
     setValorUnitarioCents(unitPriceCents);
   }, [unitPriceCents]);
+  React.useEffect(() => {
+    setRfc(fiscalPreFill.rfc);
+    setRazonSocial(fiscalPreFill.razonSocial);
+    setRegimen(fiscalPreFill.regimen);
+    setCfdiUse(fiscalPreFill.cfdiUse);
+  }, [
+    fiscalPreFill.rfc,
+    fiscalPreFill.razonSocial,
+    fiscalPreFill.regimen,
+    fiscalPreFill.cfdiUse,
+  ]);
   return (
     <div
       role="dialog"
@@ -1029,7 +1215,72 @@ function CreateInvoiceDraftDialog({
               }
               data-testid="orden-detail-create-invoice-dialog-valor"
             />
+            {unitPriceSource !== "quote" ? (
+              <p
+                role="note"
+                className="mt-1 text-xs text-amber-700"
+                data-testid="orden-detail-create-invoice-dialog-valor-warning"
+              >
+                {messages.ordenes.createInvoiceQuoteSubtotalFallback}
+              </p>
+            ) : null}
           </div>
+          <fieldset className="rounded-md border bg-secondary/30 p-3">
+            <legend className="px-1 text-xs font-medium">
+              {messages.ordenes.createInvoiceFiscalSectionTitle}
+            </legend>
+            <p className="mb-2 text-xs text-muted-foreground">
+              {messages.ordenes.createInvoiceFiscalSectionHelp}
+            </p>
+            <div className="grid gap-2 md:grid-cols-2">
+              <div>
+                <Label htmlFor="ci-rfc">{messages.clientes.rfc}</Label>
+                <Input
+                  id="ci-rfc"
+                  value={rfc}
+                  onChange={(e) => setRfc(e.target.value.toUpperCase())}
+                  placeholder="XAXX010101000"
+                  data-testid="orden-detail-create-invoice-dialog-rfc"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ci-razon">
+                  {messages.clientes.razonSocial}
+                </Label>
+                <Input
+                  id="ci-razon"
+                  value={razonSocial}
+                  onChange={(e) => setRazonSocial(e.target.value)}
+                  data-testid="orden-detail-create-invoice-dialog-razon"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ci-regimen">
+                  {messages.clientes.regimen}
+                </Label>
+                <Input
+                  id="ci-regimen"
+                  value={regimen}
+                  onChange={(e) => setRegimen(e.target.value)}
+                  data-testid="orden-detail-create-invoice-dialog-regimen"
+                />
+              </div>
+              <div>
+                <Label htmlFor="ci-cfdi-use">
+                  {messages.clientes.cfdiUse}
+                </Label>
+                <Input
+                  id="ci-cfdi-use"
+                  value={cfdiUse}
+                  onChange={(e) => setCfdiUse(e.target.value)}
+                  data-testid="orden-detail-create-invoice-dialog-cfdi-use"
+                />
+              </div>
+            </div>
+            <p className="mt-2 break-all text-xs text-muted-foreground">
+              Cliente: <span className="font-mono">{clientId}</span>
+            </p>
+          </fieldset>
           <div className="rounded-md border bg-secondary/40 p-2 text-xs">
             <p className="font-medium">{messages.ordenes.createInvoiceSummary}</p>
             <p>
@@ -1064,9 +1315,19 @@ function CreateInvoiceDraftDialog({
                 dueDate,
                 descripcion,
                 valorUnitarioCents,
+                rfc,
+                razonSocial,
+                regimen,
+                cfdiUse,
               })
             }
-            disabled={submitting || descripcion.trim().length === 0}
+            disabled={
+              submitting ||
+              descripcion.trim().length === 0 ||
+              rfc.trim().length === 0 ||
+              razonSocial.trim().length === 0 ||
+              regimen.trim().length === 0
+            }
             aria-busy={submitting ? true : undefined}
             data-testid="orden-detail-create-invoice-dialog-submit"
           >

@@ -381,6 +381,24 @@ export const messages = {
       "La OS o el cliente ya no existen; refresca el detalle.",
     createInvoiceErrorGeneric:
       "No fue posible crear la factura borrador.",
+    // IMPL-20260825-34 (intento 2) · Datos fiscales del cliente
+    // (BR-N218) requeridos por `buildFromOrder`. La UI los captura en
+    // el diálogo y los persiste vía `trpc.clientes.fiscal.upsert`
+    // ANTES de armar el comprobante, para no recibir
+    // `INVOICE_FISCAL_DATA_REQUIRED` (409) ni falso éxito.
+    createInvoiceFiscalSectionTitle: "Datos fiscales del cliente (BR-N218)",
+    createInvoiceFiscalSectionHelp:
+      "Captura RFC, razón social y régimen fiscal. Si ya existen, sólo se actualizan los campos que modifiques.",
+    createInvoiceFiscalMissing:
+      "El cliente no tiene RFC, razón social ni régimen. Captúralos antes de armar la factura (BR-N218).",
+    createInvoiceFiscalUpsertError:
+      "No fue posible guardar los datos fiscales del cliente; la factura NO se construyó. Revisa el RFC y vuelve a intentar.",
+    createInvoiceFiscalInvalidRFC:
+      "RFC inválido. Verifica el formato (3-4 letras, 6 dígitos, 3 alfanuméricos).",
+    createInvoiceQuoteMissing:
+      "No se pudo cargar la cotización asociada a la OS; refresca el detalle.",
+    createInvoiceQuoteSubtotalFallback:
+      "La cotización no expone subtotal neto; usando `soldTotalCents` (verificar con finanzas que no aplica IVA doble).",
   },
   cuestionarios: {
     title: "Cuestionarios",
