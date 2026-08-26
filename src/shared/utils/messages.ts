@@ -339,6 +339,48 @@ export const messages = {
       "No tienes permisos para marcar la OS en ejecución (autorizar_os).",
     markInExecutionErrorGeneric:
       "No fue posible marcar la OS en ejecución.",
+    // IMPL-20260825-34 · Acción "Crear factura borrador" desde una OS
+    // `delivered` o `closed` (SPEC-007 BR-N301, BR-N218). Sólo arma el
+    // comprobante y lo persiste en `borrador`; NO timbra, NO cobra.
+    // El handler envía el UUID real de la OS (`o.id`) y deriva la
+    // línea inicial de `o.soldTotalCents` (qty 1). Sin prompt() ni
+    // UUID manual ni acceso directo a BD.
+    createInvoiceTitle: "Crear factura borrador",
+    createInvoiceSubtitle:
+      "Arma el comprobante CFDI en estado `borrador` desde esta OS. NO se timbra ni se cobra en este paso.",
+    createInvoiceAction: "Crear factura borrador",
+    createInvoiceSubmitting: "Creando factura…",
+    createInvoiceHelp:
+      "Sólo se muestra cuando la OS está en `delivered` o `closed`. La fecha de vencimiento debe ser al menos 7 días posterior a hoy.",
+    createInvoiceOpenDialog: "Crear factura borrador",
+    createInvoiceDialogTitle: "Armar comprobante (borrador)",
+    createInvoiceDialogDescription:
+      "Confirma fecha de vencimiento y descripción; el importe inicial se deriva del total vendido de la OS (qty 1).",
+    createInvoiceDueDate: "Fecha de vencimiento (YYYY-MM-DD)",
+    createInvoiceDescription: "Descripción",
+    createInvoiceDescriptionPlaceholder:
+      "Servicios profesionales OS {code}",
+    createInvoiceClaveProdServ: "ClaveProdServ CFDI",
+    createInvoiceUnitPriceCents: "Valor unitario (¢ MXN)",
+    createInvoiceSummary: "Resumen",
+    createInvoiceSuccessTitle: "Factura borrador creada",
+    createInvoiceSuccessBody:
+      "Factura {code} creada en estado `borrador` (${total}). Abre Facturación para revisar, ajustar y timbrar.",
+    createInvoiceOpenList: "Abrir Facturación",
+    createInvoiceErrorDueDatePast:
+      "La fecha de vencimiento debe ser hoy o posterior.",
+    createInvoiceErrorDueDateMin:
+      "La fecha de vencimiento debe ser al menos 7 días posterior a hoy.",
+    createInvoiceErrorMontoNegativo:
+      "El valor unitario no puede ser negativo.",
+    createInvoiceErrorTransition:
+      "La OS ya no admite esta acción (no está en `delivered` o `closed`); refresca el detalle.",
+    createInvoiceErrorForbidden:
+      "No tienes permisos para crear facturas (gestionar_facturacion).",
+    createInvoiceErrorNotFound:
+      "La OS o el cliente ya no existen; refresca el detalle.",
+    createInvoiceErrorGeneric:
+      "No fue posible crear la factura borrador.",
   },
   cuestionarios: {
     title: "Cuestionarios",

@@ -127,6 +127,65 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
     onSuccess: () => utils.ordenServicio.byId.invalidate({ orderId: id }),
   });
 
+  // IMPL-20260825-34 · Construir factura borrador (CFDI) desde una OS
+  // `delivered` o `closed` (SPEC-20260817-007 BR-N301/BR-N218). El
+  // contrato ya existente `facturacion.buildFromOrder` exige OS + cliente
+  // y persiste la factura en estado `borrador` (sin timbrar ni cobrar).
+  // La UI envía el UUID real de la OS (`o.id`) y deriva la línea inicial
+  // de `o.soldTotalCents` (qty 1, valor unitario en centavos). NO pide
+  // UUID manual, NO abre `window.prompt`, NO accede a BD. Sólo orquesta
+  // el contrato y mapea errores canónicos; en éxito invalida los
+  // listados de facturación para que el módulo los vea sin recargar la
+  // página manualmente.
+  const buildInvoiceDraft = trpc.facturacion.buildFromOrder.useMutation({
+    onError: (err) => {
+      setCreatedInvoice(null);
+      const code = err.data?.code ?? null;
+      if (code === "FORBIDDEN" || code === "UNAUTHORIZED") {
+        setCreateInvoiceError(messages.ordenes.createInvoiceErrorForbidden);
+        return;
+      }
+      if (code === "ORDER_NOT_FOUND" || code === "CLIENT_NOT_FOUND") {
+        setCreateInvoiceError(messages.ordenes.createInvoiceErrorNotFound);
+        return;
+      }
+      if (code === "ORDER_NOT_DELIVERABLE" || code === "INVOICE_BUILD_INVALID") {
+        setCreateInvoiceError(messages.ordenes.createInvoiceErrorTransition);
+        return;
+      }
+      setCreateInvoiceError(
+        err.message ?? messages.ordenes.createInvoiceErrorGeneric,
+      );
+    },
+    onSuccess: async (preview) => {
+      setCreateInvoiceError(null);
+      // El router devuelve un InvoicePreview/DTO con `id`, `code`,
+      // `status` y totales. La UI los expone literalmente para
+      // mantener el contrato visible y anti-falso-éxito: nunca se
+      // afirma éxito con un id inventado. `buildFromOrder` retorna
+      // `InvoicePreviewDTO = { invoice: InvoiceDTO, client, fiscalConfig }`,
+      // de modo que la identidad viene de `preview.invoice`.
+      const invoice = preview?.invoice;
+      if (!invoice) {
+        // Defensa: si el backend cambiara el shape, NO afirmamos éxito.
+        setCreateInvoiceError(messages.ordenes.createInvoiceErrorGeneric);
+        return;
+      }
+      setCreatedInvoice({
+        id: invoice.id,
+        code: invoice.code,
+        status: invoice.status,
+        totalCents: invoice.totalCents,
+      });
+      // Refresca el listado de facturación para que la nueva factura
+      // borrador aparezca al abrir el módulo sin recarga manual.
+      await Promise.all([
+        utils.facturacion.list.invalidate(),
+        utils.facturacion.byId.invalidate(),
+      ]);
+    },
+  });
+
   // IMPL-20260825-29 · Crear Proyecto desde una OS `authorized_to_start`.
   // El contrato `proyectos.createFromOrder({ orderId })` recibe el UUID
   // real de la OS (`o.id`) y resuelve el PL desde la OS en el servicio
@@ -205,6 +264,35 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
   const [markInExecutionSuccess, setMarkInExecutionSuccess] =
     React.useState(false);
   const [markInExecutionError, setMarkInExecutionError] = React.useState<
+    string | null
+  >(null);
+  // IMPL-20260825-34 · Estado local del flujo "Crear factura borrador"
+  // (SPEC-20260817-007 BR-N301/BR-N218). Conserva sólo en memoria
+  // mientras la sesión del usuario sigue activa. El formulario envía
+  // la fecha de vencimiento (validada en cliente) y la descripción;
+  // el valor unitario se deriva de `o.soldTotalCents` (no editable,
+  // para que la línea inicial refleje el monto real de la OS).
+  const [createInvoiceOpen, setCreateInvoiceOpen] = React.useState(false);
+  const defaultDueDate = React.useMemo(() => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + 7);
+    return d.toISOString().slice(0, 10);
+  }, []);
+  const [createInvoiceDescription, setCreateInvoiceDescription] =
+    React.useState("");
+  const [createInvoiceFieldError, setCreateInvoiceFieldError] = React.useState<
+    string | null
+  >(null);
+  const [createdInvoice, setCreatedInvoice] = React.useState<
+    | {
+        id: string;
+        code: string;
+        status: string;
+        totalCents: number | null;
+      }
+    | null
+  >(null);
+  const [createInvoiceError, setCreateInvoiceError] = React.useState<
     string | null
   >(null);
 
@@ -651,6 +739,343 @@ export function OrdenDetail({ id }: OrdenDetailProps) {
           </CardContent>
         </Card>
       ) : null}
+
+      {/* IMPL-20260825-34 · Crear factura borrador desde OS `delivered`
+          o `closed` (SPEC-20260817-007 BR-N301/BR-N218). Sólo se
+          renderiza cuando `o.status === "delivered"` o `o.status ===
+          "closed"`; en cualquier otro estado la UI NO muestra acción
+          falsa. El contrato `facturacion.buildFromOrder` ya exige OS
+          + cliente y persiste la factura en `borrador` (sin timbrar,
+          sin cobrar). NO se envía UUID manual ni se abre prompt();
+          `o.id` es el UUID real de la OS y la línea inicial se deriva
+          de `o.soldTotalCents` (qty 1). Tras éxito se invalida el
+          listado de facturas para que aparezcan al abrir Facturación. */}
+      {o.status === "delivered" || o.status === "closed" ? (
+        <Card data-testid="orden-detail-create-invoice">
+          <CardHeader>
+            <CardTitle>{messages.ordenes.createInvoiceTitle}</CardTitle>
+            <CardDescription>
+              {messages.ordenes.createInvoiceSubtitle}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-xs text-muted-foreground">
+              {messages.ordenes.createInvoiceHelp}
+            </p>
+            <Button
+              type="button"
+              onClick={() => {
+                setCreateInvoiceError(null);
+                if (buildInvoiceDraft.isPending || createdInvoice) return;
+                setCreateInvoiceDescription(
+                  messages.ordenes.createInvoiceDescriptionPlaceholder.replace(
+                    "{code}",
+                    o.code,
+                  ),
+                );
+                setCreateInvoiceOpen(true);
+              }}
+              disabled={buildInvoiceDraft.isPending || !!createdInvoice}
+              aria-busy={buildInvoiceDraft.isPending ? true : undefined}
+              data-testid="orden-detail-create-invoice-action"
+            >
+              {buildInvoiceDraft.isPending
+                ? messages.ordenes.createInvoiceSubmitting
+                : messages.ordenes.createInvoiceAction}
+            </Button>
+            {createInvoiceError ? (
+              <p
+                role="alert"
+                className="text-sm text-destructive"
+                data-testid="orden-detail-create-invoice-error"
+              >
+                {createInvoiceError}
+              </p>
+            ) : null}
+            {createdInvoice ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="mt-2 rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900"
+                data-testid="orden-detail-create-invoice-success"
+              >
+                <p className="font-medium">
+                  {messages.ordenes.createInvoiceSuccessTitle}
+                </p>
+                <p className="mt-1">
+                  <span className="text-muted-foreground">ID: </span>
+                  <span
+                    className="font-mono"
+                    data-testid="orden-detail-create-invoice-success-id"
+                  >
+                    {createdInvoice.id}
+                  </span>
+                </p>
+                <p className="mt-1">
+                  <span className="text-muted-foreground">Código: </span>
+                  <span
+                    className="font-mono"
+                    data-testid="orden-detail-create-invoice-success-code"
+                  >
+                    {createdInvoice.code}
+                  </span>
+                </p>
+                <p className="mt-1">
+                  <span className="text-muted-foreground">Estado: </span>
+                  <span
+                    className="font-mono"
+                    data-testid="orden-detail-create-invoice-success-status"
+                  >
+                    {createdInvoice.status}
+                  </span>
+                </p>
+                {createdInvoice.totalCents != null ? (
+                  <p className="mt-1">
+                    <span className="text-muted-foreground">Total: </span>
+                    <span
+                      className="font-mono"
+                      data-testid="orden-detail-create-invoice-success-total"
+                    >
+                      {fmtMXN(createdInvoice.totalCents)}
+                    </span>
+                  </p>
+                ) : null}
+                <p className="mt-2">
+                  <Link
+                    href="/facturacion"
+                    className="underline"
+                    data-testid="orden-detail-create-invoice-success-link"
+                  >
+                    {messages.ordenes.createInvoiceOpenList}
+                  </Link>
+                </p>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {createInvoiceOpen ? (
+        <CreateInvoiceDraftDialog
+          orderId={o.id}
+          orderCode={o.code}
+          unitPriceCents={o.soldTotalCents}
+          defaultDueDate={defaultDueDate}
+          defaultDescription={createInvoiceDescription}
+          submitting={buildInvoiceDraft.isPending}
+          onSubmit={(input) => {
+            setCreateInvoiceFieldError(null);
+            setCreateInvoiceError(null);
+            // Validación de vigencia en cliente antes de salir al
+            // backend: dueDate >= hoy y >= hoy+7d, valor unitario
+            // no negativo. La firma YYYY-MM-DD la exige el zod
+            // (`InvoiceBuildInputSchema`).
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) {
+              setCreateInvoiceFieldError(
+                messages.ordenes.createInvoiceErrorDueDatePast,
+              );
+              return;
+            }
+            const today = new Date();
+            today.setUTCHours(0, 0, 0, 0);
+            const due = new Date(`${input.dueDate}T00:00:00.000Z`);
+            if (Number.isNaN(due.getTime()) || due.getTime() < today.getTime()) {
+              setCreateInvoiceFieldError(
+                messages.ordenes.createInvoiceErrorDueDatePast,
+              );
+              return;
+            }
+            const min = new Date(today);
+            min.setUTCDate(min.getUTCDate() + 7);
+            if (due.getTime() < min.getTime()) {
+              setCreateInvoiceFieldError(
+                messages.ordenes.createInvoiceErrorDueDateMin,
+              );
+              return;
+            }
+            if (input.valorUnitarioCents < 0) {
+              setCreateInvoiceFieldError(
+                messages.ordenes.createInvoiceErrorMontoNegativo,
+              );
+              return;
+            }
+            if (input.descripcion.trim().length === 0) {
+              setCreateInvoiceFieldError(
+                messages.ordenes.createInvoiceErrorGeneric,
+              );
+              return;
+            }
+            buildInvoiceDraft.mutate({
+              orderId: id,
+              dueDate: input.dueDate,
+              concept: [
+                {
+                  claveProdServ: "84111506",
+                  descripcion: input.descripcion.trim(),
+                  cantidad: 1,
+                  valorUnitarioCents: input.valorUnitarioCents,
+                },
+              ],
+            });
+          }}
+          onClose={() => {
+            if (buildInvoiceDraft.isPending) return;
+            setCreateInvoiceOpen(false);
+            setCreateInvoiceFieldError(null);
+          }}
+          fieldError={createInvoiceFieldError}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * IMPL-20260825-34 · Diálogo accesible para armar la factura borrador
+ * (SPEC-20260817-007 BR-N301). El formulario NO pide UUID manual:
+ * `orderId` se recibe del padre. El valor unitario inicial se deriva
+ * del `soldTotalCents` real de la OS (qty 1), con descripción
+ * pre-llenada configurable. NO abre `window.prompt` ni accede a BD.
+ */
+function CreateInvoiceDraftDialog({
+  orderId,
+  orderCode,
+  unitPriceCents,
+  defaultDueDate,
+  defaultDescription,
+  submitting,
+  fieldError,
+  onSubmit,
+  onClose,
+}: {
+  orderId: string;
+  orderCode: string;
+  unitPriceCents: number;
+  defaultDueDate: string;
+  defaultDescription: string;
+  submitting: boolean;
+  fieldError: string | null;
+  onSubmit: (input: {
+    dueDate: string;
+    descripcion: string;
+    valorUnitarioCents: number;
+  }) => void;
+  onClose: () => void;
+}) {
+  const [dueDate, setDueDate] = React.useState(defaultDueDate);
+  const [descripcion, setDescripcion] = React.useState(defaultDescription);
+  const [valorUnitarioCents, setValorUnitarioCents] =
+    React.useState(unitPriceCents);
+  // Sincroniza el valor unitario inicial cuando la OS padre cambia
+  // (no editable en este corte: la línea inicial refleja la OS).
+  React.useEffect(() => {
+    setValorUnitarioCents(unitPriceCents);
+  }, [unitPriceCents]);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={messages.ordenes.createInvoiceDialogTitle}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+      data-testid="orden-detail-create-invoice-dialog"
+    >
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-lg bg-background p-6 shadow-xl sm:rounded-lg">
+        <h2 className="mb-1 text-lg font-bold">
+          {messages.ordenes.createInvoiceDialogTitle}
+        </h2>
+        <p className="mb-4 text-xs text-muted-foreground">
+          {messages.ordenes.createInvoiceDialogDescription}
+        </p>
+        <div className="space-y-3 text-sm">
+          <div>
+            <Label htmlFor="ci-due-date">
+              {messages.ordenes.createInvoiceDueDate}
+            </Label>
+            <Input
+              id="ci-due-date"
+              type="date"
+              value={dueDate}
+              min={defaultDueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              data-testid="orden-detail-create-invoice-dialog-due"
+            />
+          </div>
+          <div>
+            <Label htmlFor="ci-descripcion">
+              {messages.ordenes.createInvoiceDescription}
+            </Label>
+            <Input
+              id="ci-descripcion"
+              value={descripcion}
+              onChange={(e) => setDescripcion(e.target.value)}
+              placeholder={messages.ordenes.createInvoiceDescriptionPlaceholder.replace(
+                "{code}",
+                orderCode,
+              )}
+              data-testid="orden-detail-create-invoice-dialog-descripcion"
+            />
+          </div>
+          <div>
+            <Label htmlFor="ci-valor">
+              {messages.ordenes.createInvoiceUnitPriceCents}
+            </Label>
+            <Input
+              id="ci-valor"
+              type="number"
+              min={0}
+              value={valorUnitarioCents}
+              onChange={(e) =>
+                setValorUnitarioCents(Number(e.target.value) || 0)
+              }
+              data-testid="orden-detail-create-invoice-dialog-valor"
+            />
+          </div>
+          <div className="rounded-md border bg-secondary/40 p-2 text-xs">
+            <p className="font-medium">{messages.ordenes.createInvoiceSummary}</p>
+            <p>
+              OS: <span className="font-mono">{orderId}</span> · qty 1 ·{" "}
+              {fmtMXN(valorUnitarioCents)}
+            </p>
+          </div>
+          {fieldError ? (
+            <p
+              role="alert"
+              className="text-xs text-destructive"
+              data-testid="orden-detail-create-invoice-dialog-error"
+            >
+              {fieldError}
+            </p>
+          ) : null}
+        </div>
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onClose}
+            disabled={submitting}
+            data-testid="orden-detail-create-invoice-dialog-cancel"
+          >
+            Cerrar
+          </Button>
+          <Button
+            type="button"
+            onClick={() =>
+              onSubmit({
+                dueDate,
+                descripcion,
+                valorUnitarioCents,
+              })
+            }
+            disabled={submitting || descripcion.trim().length === 0}
+            aria-busy={submitting ? true : undefined}
+            data-testid="orden-detail-create-invoice-dialog-submit"
+          >
+            {submitting
+              ? messages.ordenes.createInvoiceSubmitting
+              : messages.ordenes.createInvoiceAction}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
